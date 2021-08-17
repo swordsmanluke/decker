@@ -10,6 +10,8 @@ edition = "2018"
 # Terminal control
 termion = "1"
 portable-pty = "0.4.0"
+# Byte manipulation
+bytes = "1.0.1"
 # Simplify/Clarify error-handling
 anyhow = "1.0.43"
 # Regex for parsing terminal output
