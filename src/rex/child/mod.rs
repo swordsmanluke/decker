@@ -68,11 +68,8 @@ impl ChildProcess {
 
             // Consume input
             let input = self.read_input()?;
-            info!("rcvd {}", input);
             write!(child.master, "{}", input)?;
             child.master.flush()?;
-
-
         }
 
         Ok(())

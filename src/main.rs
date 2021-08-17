@@ -44,7 +44,7 @@ fn run() -> anyhow::Result<()> {
         let mut input = String::new();
         stdin.read_to_string(&mut input)?;
         if !input.is_empty() {
-            info!("Read input: {}", input.as_str());
+            info!("Sending input: {}", input.as_str());
             input_tx.send(input)?;
         }
 
