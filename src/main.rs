@@ -27,12 +27,12 @@ fn run() -> anyhow::Result<()> {
 
     let (output_tx, mut output_rx) = channel();
     let (status_tx, mut status_rx) = channel();
-    let mut proc = ChildProcess::new(output_tx, status_tx);
+    let mut proc = ChildProcess::new(output_tx, status_tx, (24, 120));
     let input_tx = proc.input_tx();
 
     thread::spawn( move || {
         proc.run().expect("Child crashed");
-        info!("Process exited! Shutdown.");
+        info!("Process exited! Begin shutdown...");
         proc.shutdown().unwrap();
     });
 
@@ -44,7 +44,6 @@ fn run() -> anyhow::Result<()> {
         let mut input = String::new();
         stdin.read_to_string(&mut input)?;
         if !input.is_empty() {
-            info!("Sending input: {}", input.as_str());
             input_tx.send(input)?;
         }
 
@@ -74,7 +73,7 @@ fn main() {
     // Input Thread: Forward stdin to the child's Input channel
     // Output Thread: Forward stdout from the child to the Output channel
     match run() {
-        Ok(_) => { print!("{}", "Shutdown!") },
-        Err(err) => { print!("{:?}", err)}
+        Ok(_) => { println!("{}", "Shutdown!") },
+        Err(err) => { println!("{:?}", err)}
     }
 }

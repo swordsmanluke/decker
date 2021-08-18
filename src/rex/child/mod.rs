@@ -14,17 +14,19 @@ pub struct ChildProcess {
     input_sender: Sender<String>,
     pub output_sender: Sender<Bytes>,
     pub status_sender: Sender<String>,
+    size: (u16,u16)
 }
 
 impl ChildProcess {
-    pub fn new(out_tx: Sender<Bytes>, status_tx: Sender<String>) -> ChildProcess {
+    pub fn new(out_tx: Sender<Bytes>, status_tx: Sender<String>, size: (u16,u16)) -> ChildProcess {
         let (in_tx, in_rx) = channel();
         ChildProcess {
             shutdown: false,
             input_receiver: in_rx,
             input_sender: in_tx,
             output_sender: out_tx,
-            status_sender: status_tx
+            status_sender: status_tx,
+            size: size
         }
     }
 
@@ -43,28 +45,38 @@ impl ChildProcess {
 
     /***
     Launches the child's process and runs until the process exits
-     */
+    ***/
     pub fn run(&mut self) -> anyhow::Result<()> {
         let mut child = self.launch()?;
 
         // forward output
         let mut reader = child.master.try_clone_reader()?;
         let sender = self.output_sender.clone();
-        std::thread::spawn( move || {
-            loop {
+        let (stop_tx, stop_rx) = channel();
+
+        let out_loop = std::thread::spawn( move || {
+            while let Err(TryRecvError::Empty) = stop_rx.try_recv() {
                 let mut output = [0u8; 1024];
                 let size = reader.read(&mut output).unwrap_or(0);
                 sender.send(Bytes::from(output[..size].to_owned())).unwrap();
             };
+            info!("Exited output loop!")
         });
 
         loop {
             if self.shutdown {
-                info!("received shutdown sequence - leaving");
+                info!("received shutdown sequence - exiting input loop");
+                stop_tx.send("staaahp")?;
+                // FIXME: Apparently I can't use '?' here because the type isn't sized. But unwrap is fine?
+                out_loop.join().unwrap();
                 break;
             }
 
-            // Still running - process I/O!
+            let pid = child.master.process_group_leader();
+            if pid.is_none() {
+                info!("received shutdown sequence - leaving");
+                break;
+            }
 
             // Consume input
             let input = self.read_input()?;
@@ -80,10 +92,7 @@ impl ChildProcess {
      ***/
     fn read_input(&mut self) -> anyhow::Result<String> {
         match self.input_receiver.try_recv() {
-            Ok(s) => {
-                info!("rcvd input: {}", s.as_str());
-                Ok(s)
-            },
+            Ok(s) => { Ok(s) },
             Err(TryRecvError::Empty) => Ok(String::new()),
             Err(e) => Err(e.into())
         }
@@ -92,8 +101,8 @@ impl ChildProcess {
     fn launch(&self) -> anyhow::Result<PtyPair> {
         let pty_sys = native_pty_system();
         let pair = pty_sys.openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows: self.size.0,
+            cols: self.size.1,
             // Not all systems support pixel_width, pixel_height,
             // but it is good practice to set it to something
             // that matches the size of the selected font.  That
