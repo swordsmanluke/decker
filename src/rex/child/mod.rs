@@ -6,21 +6,22 @@ use std::sync::mpsc::{Receiver, Sender, channel, TryRecvError};
 use std::io::{Read, Write};
 use log::info;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, PtyPair};
-use bytes::Bytes;
 
 pub struct ChildProcess {
+    command: String,
     shutdown: bool,
     input_receiver: Receiver<String>,
     input_sender: Sender<String>,
-    pub output_sender: Sender<Bytes>,
+    pub output_sender: Sender<String>,
     pub status_sender: Sender<String>,
     size: (u16,u16)
 }
 
 impl ChildProcess {
-    pub fn new(out_tx: Sender<Bytes>, status_tx: Sender<String>, size: (u16,u16)) -> ChildProcess {
+    pub fn new(command: &str, out_tx: Sender<String>, status_tx: Sender<String>, size: (u16,u16)) -> ChildProcess {
         let (in_tx, in_rx) = channel();
         ChildProcess {
+            command: command.to_owned(),
             shutdown: false,
             input_receiver: in_rx,
             input_sender: in_tx,
@@ -58,7 +59,7 @@ impl ChildProcess {
             while let Err(TryRecvError::Empty) = stop_rx.try_recv() {
                 let mut output = [0u8; 1024];
                 let size = reader.read(&mut output).unwrap_or(0);
-                sender.send(Bytes::from(output[..size].to_owned())).unwrap();
+                sender.send(String::from_utf8(output[..size].to_owned()).unwrap()).unwrap();
             };
             info!("Exited output loop!")
         });
@@ -112,7 +113,8 @@ impl ChildProcess {
             pixel_height: 0,
         })?;
 
-        let cmd = CommandBuilder::new("/usr/bin/bash");
+        // TODO: Split command to handle args
+        let cmd = CommandBuilder::new(self.command.as_str());
 
         pair.slave.spawn_command(cmd)?;
         Ok(pair)
