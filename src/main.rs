@@ -1,11 +1,10 @@
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::io::{Read, Write, stdout};
-use std::thread;
 use log::info;
 use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::IntoRawMode;
-use crate::rex::{ProcessOrchestrator, Task};
+use crate::rex::{Task, MasterControl};
 
 mod rex;
 
@@ -27,17 +26,13 @@ fn run() -> anyhow::Result<()> {
     let mut stdout = stdout().into_raw_mode()?;
 
     let (output_tx, mut output_rx) = channel();
-    let mut po = ProcessOrchestrator::new(output_tx);
-    po.register(Task{ name: String::from("bash"), command: String::from("bash") } )?;
+    let mut mcp = MasterControl::new(output_tx);
+    mcp.register(Task{ name: String::from("bash"), command: String::from("bash") } )?;
 
-    let input_tx = po.input_tx();
+    let input_tx = mcp.input_tx();
 
-    po.execute(&"bash".to_string())?;
-    po.activate_proc(&"bash".to_string());
-
-    thread::spawn(move ||
-        po.run()
-    );
+    mcp.execute(&"bash".to_string())?;
+    mcp.activate_proc(&"bash".to_string())?;
 
     loop {
         // read stdin and forward it to the proc.
@@ -51,8 +46,8 @@ fn run() -> anyhow::Result<()> {
         // read stdout and display it
         let output = read_output(&mut output_rx)?;
         match output {
-            Some((name, output)) => {
-                write!(stdout, "{}", output)?;
+            Some(pout) => {
+                write!(stdout, "{}", pout.output)?;
                 stdout.flush()?;
             }
             None => {}

@@ -14,6 +14,7 @@ portable-pty = "0.4.0"
 bytes = "1.0.1"
 # Simplify/Clarify error-handling
 anyhow = "1.0.43"
+simple-error = "0.2.3"
 # Regex for parsing terminal output
 regex = "1"
 # Logging
@@ -23,5 +24,7 @@ simplelog = "^0.7.4"
 toml = "0.5.6"
 # (de)Serialization TODO: Check out https://github.com/not-fl3/nanoserde/ - lighter weight alt.
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.59"
+
 # UUID support. Can't believe this isn't in the stdlib.
 uuid = { version = "0.4", features = ["serde", "v4"] }
