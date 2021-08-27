@@ -27,7 +27,7 @@ fn run() -> anyhow::Result<()> {
 
     let (output_tx, mut output_rx) = channel();
     let mut mcp = MasterControl::new(output_tx);
-    mcp.register(Task{ name: String::from("bash"), command: String::from("bash") } )?;
+    mcp.register(Task::new("bash", "bash", "bash") )?;
 
     let input_tx = mcp.input_tx();
 

@@ -17,10 +17,24 @@ pub struct MasterControl {
     proc_orc_stdin_tx: Sender<String>
 }
 
+pub type TaskId = String;
+
 #[derive(Serialize, Deserialize)]
 pub struct Task {
-    pub(crate) name: String,
-    pub(crate) command: String
+    pub id: TaskId,
+    pub name: String,
+    pub command: String
+}
+
+impl Task {
+    pub fn new(id: &str, name: &str, command: &str) -> Task {
+        Task {
+            id: id.into(),
+            name: name.into(),
+            command: command.into()
+        }
+    }
+
 }
 
 //  All of the threaded functionality  lives in the  "real" orchestrator class
