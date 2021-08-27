@@ -4,7 +4,8 @@ use log::info;
 use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::IntoRawMode;
-use crate::rex::{Task, MasterControl};
+use crate::rex::{Task, MasterControl, TaskId};
+use crate::rex::terminal::{Vt100Translator, View, TerminalLocation, TerminalSize};
 
 mod rex;
 
@@ -37,6 +38,10 @@ fn run() -> anyhow::Result<()> {
     loop {
         // read stdin and forward it to the proc.
         let mut input = String::new();
+        let mut translator = Vt100Translator::new();
+        let task_id: TaskId = "bash".into();
+        let v = View { location: TerminalLocation::new(3, 5), dimensions: TerminalSize::new(24, 80) };
+        translator.register(task_id, v);
         stdin.read_to_string(&mut input)?;
         if !input.is_empty() {
             info!("Sending input: {}", input);
@@ -47,13 +52,14 @@ fn run() -> anyhow::Result<()> {
         let output = read_output(&mut output_rx)?;
         match output {
             Some(pout) => {
-                write!(stdout, "{}", pout.output)?;
+                translator.push(pout.name, &pout.output);
+                translator.write(&mut stdout);
                 stdout.flush()?;
             }
             None => {}
         }
     }
-    Ok(())
+    // Ok(())
 }
 
 fn init_logging() -> anyhow::Result<()> {

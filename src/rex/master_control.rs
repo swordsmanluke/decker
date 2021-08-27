@@ -1,10 +1,9 @@
 use crate::rex::{MasterControl, ProcOutput, ProcessOrchestrator, Task};
 use std::sync::mpsc::{Sender, channel};
-use std::collections::HashMap;
 use std::thread;
 use log::{info, warn};
-use std::time::{Instant, Duration};
-use std::ops::{Add, Deref};
+use std::time::Duration;
+use std::ops::Deref;
 use simple_error::bail;
 
 impl MasterControl {

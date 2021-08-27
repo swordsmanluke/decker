@@ -5,6 +5,8 @@ use std::collections::HashMap;
 pub(crate) mod child;
 mod process_orchestrator;
 mod master_control;
+pub(crate) mod terminal;
+
 use serde::{Deserialize, Serialize};
 
 pub struct ProcOutput { pub name: String, pub output: String }

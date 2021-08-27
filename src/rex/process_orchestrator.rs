@@ -89,7 +89,7 @@ impl ProcessOrchestrator {
     fn process_commands(&mut self) -> anyhow::Result<()>{
         match self.command_rx.try_recv() {
             Ok(command) => {
-                let mut parts = command.split(":").map(|s| s.trim().to_string()).collect::<Vec<String>>();
+                let parts = command.split(":").map(|s| s.trim().to_string()).collect::<Vec<String>>();
                 let cmd = parts.first().unwrap(); // command part
                 let data = parts[1..].join(":");
 
