@@ -1,4 +1,5 @@
 mod vt100_translator;
+mod vt100_string;
 
 use std::collections::HashMap;
 use crate::rex::terminal::vt100_translator::StreamState;

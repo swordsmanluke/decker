@@ -308,6 +308,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "lazy_static",
  "log",
  "portable-pty",
  "regex",

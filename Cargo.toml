@@ -17,6 +17,8 @@ anyhow = "1.0.43"
 simple-error = "0.2.3"
 # Regex for parsing terminal output
 regex = "1"
+# Lazy eval for constantish Regex
+lazy_static = "1.4.0"
 # Logging
 log = "0.4"
 simplelog = "^0.7.4"
