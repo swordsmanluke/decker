@@ -1,4 +1,4 @@
-use crate::rex::terminal::vt100_string::{VT100String, Glyph};
+use crate::rex::terminal::glyph_string::{VT100String, Glyph};
 use regex::{Regex, Captures};
 
 pub struct Pane {

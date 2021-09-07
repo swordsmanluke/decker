@@ -1,5 +1,5 @@
 mod vt100_translator;
-mod vt100_string;
+mod glyph_string;
 mod pane;
 
 use std::collections::HashMap;
