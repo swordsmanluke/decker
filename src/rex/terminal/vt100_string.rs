@@ -3,7 +3,6 @@ use lazy_static::lazy_static;
 use regex::{Regex, Match};
 use std::cmp::{min, max};
 use std::borrow::Cow;
-use std::io::empty;
 
 pub struct VT100String {
     plain_str: String,
@@ -63,7 +62,7 @@ impl VT100String {
             println!("VT100s: {:?}", nextVT.as_str());
             cur_range.end = min(cur_range.end, nextVT.start());
             ranges.push(cur_range.clone());
-            cur_range = (nextVT.end()+1..length-1);
+            cur_range = nextVT.end()+1..length-1;
         }
 
         ranges.push(cur_range.clone());
