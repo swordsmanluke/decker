@@ -30,10 +30,27 @@ impl VT100String {
         }
     }
 
+    pub fn set(&mut self, index: usize, c: char) {
+        let extra_chars_reqd = max(0, index as i32 - (self.index_map.len() as i32 - 1));
+        println!("{} extra chars required to insert at {}", extra_chars_reqd, index);
+        for _ in 0..extra_chars_reqd {
+            self.plain_str.push(' ');
+        }
+
+        if extra_chars_reqd > 0 {
+            self.index_map = VT100String::build_index_map(&self.plain_str);
+        }
+
+        let real_idx = self.index_map[index];
+        self.plain_str.replace_range(real_idx..real_idx, &c.to_string());
+    }
+
     fn build_index_map(s: &str) -> Vec<usize> {
         let length = s.len();
         let mut out_vec: Vec<usize> = Vec::new();
-        let mut cur_idx = 0;
+
+        if s.is_empty() { return out_vec; }
+
         // Merge neighboring VT100s into single ranges, then use the start/end
         // to add indices to out_vec
         let mut vt100s = VT100String::find_vt100s(s);
@@ -167,5 +184,12 @@ mod tests {
         let vt100text = VT100String::new("TE\x1b[33m\x1b[HST");
         assert_eq!(vt100text.slice(2, vt100text.len()), "\x1b[33m\x1b[HST");
         assert_eq!(vt100text.slice(3, vt100text.len()), "T");
+    }
+
+    #[test]
+    fn it_replaces_chars_in_mid_str() {
+        let mut vt100text = VT100String::new("TE\x1b[33m\x1b[HST");
+        vt100text.set(2, 's');
+        assert_eq!(vt100text.plain_str, "TE\x1b[33m\x1b[HsT")
     }
 }
