@@ -1,10 +1,11 @@
 mod vt100_translator;
 mod glyph_string;
 mod pane;
+mod internal;
 
 use std::collections::HashMap;
-use crate::rex::terminal::vt100_translator::StreamState;
 use crate::rex::TaskId;
+use crate::rex::terminal::internal::StreamState;
 
 pub struct Vt100Translator {
     streams: HashMap<TaskId, StreamState>,

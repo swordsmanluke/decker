@@ -1,5 +1,8 @@
-use crate::rex::terminal::glyph_string::{VT100String, Glyph};
-use regex::{Regex, Captures};
+use crate::rex::terminal::glyph_string::{GlyphString, Glyph};
+use regex::{Regex, Captures, Match};
+use crate::rex::terminal::internal::{StreamState, TerminalOutput};
+use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
+use std::cmp::{min, max};
 
 pub struct Pane {
     id: String,
@@ -10,7 +13,7 @@ pub struct Pane {
     width: u16,
 
     // Cached lines
-    lines: Vec<VT100String>,
+    lines: Vec<GlyphString>,
 
     // virtual cursor location
     cur_x: usize,
@@ -18,6 +21,9 @@ pub struct Pane {
 
     // current print state
     print_state: PrintState,
+
+    // Input buffer
+    stream_state: StreamState,
 }
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
@@ -41,47 +47,6 @@ pub struct PrintState {
     pub underline: bool,
     pub blink: bool,
     pub bold: bool,
-}
-
-impl PrintState {
-    pub fn to_str(&self) -> String {
-        // TODO: Assemble a set of numbers to push together into a single command.
-
-        // Add colors first
-        let fg_base = if self.bold { 90 } else { 30 };
-        let bg_base = if self.bold { 100 } else { 40 };
-
-        let fg_str = match self.foreground {
-            Color::TWOFIFTYSIX(num) => { format!("\x1b[38;5;{}m", num) }
-            Color::RGB(r, g, b) => { format!("\x1b[38;2;{};{};{}m", r, g, b) }
-            color => { format!("\x1b[{}m", fg_base + color.to_offset()) }
-        };
-
-        let bg_str = match self.background {
-            Color::TWOFIFTYSIX(num) => { format!("\x1b[38;5;{}m", num) }
-            Color::RGB(r, g, b) => { format!("\x1b[38;2;{};{};{}m", r, g, b) }
-            color => { format!("\x1b[{}m", bg_base + color.to_offset()) }
-        };
-
-        let blink = if self.blink {
-            "\x1b[5m"
-        } else {
-            ""
-        };
-
-        let underlined = if self.underline {
-            "\x1b[4m"
-        } else {
-            ""
-        };
-
-        let mut out = String::from(fg_str);
-        out.push_str(&bg_str);
-        out.push_str(&blink);
-        out.push_str(&underlined);
-
-        out
-    }
 }
 
 impl Color {
@@ -135,6 +100,88 @@ impl Default for PrintState {
 }
 
 impl PrintState {
+    /****
+    Returns the VT100 codes required to transform self -> other, but does not mutate
+     */
+    pub fn diff_str(&self, other: &PrintState) -> String {
+        let mut out = String::new();
+
+        println!("{:?} == {:?} ? {}",
+                 self.foreground, other.foreground,
+                 self.foreground == other.foreground);
+
+        if self.foreground != other.foreground {
+            println!("Foregrounds do not match");
+            out += &other.foreground_string();
+        }
+
+        if self.background != other.background {
+            println!("Backgrounds do not match");
+            out += &other.background_string();
+        }
+
+        println!("{:?} == {:?} ? {}",
+                 self.background, other.background,
+                 self.background == other.background);
+
+        if self.underline != other.underline || self.blink != other.blink {
+            // Can't turn these "off" easily, so we have to reset to default
+            // and then apply the new state.
+            println!("Blink or Underline do not match, resetting");
+            out = String::from("\x1b[0m");
+            out += &other.to_str();
+        }
+
+        out
+    }
+
+    pub fn to_str(&self) -> String {
+        // TODO: Assemble a set of numbers to push together into a single command.
+
+        // Check colors first
+        let fg_str = self.foreground_string();
+        let bg_str = self.background_string();
+
+        let blink = if self.blink {
+            "\x1b[5m"
+        } else {
+            ""
+        };
+
+        let underlined = if self.underline {
+            "\x1b[4m"
+        } else {
+            ""
+        };
+
+        let mut out = String::from(fg_str);
+        out.push_str(&bg_str);
+        out.push_str(&blink);
+        out.push_str(&underlined);
+
+        out
+    }
+
+    fn background_string(&self) -> String {
+        let bg_base = if self.bold { 100 } else { 40 };
+        let bg_str = match self.background {
+            Color::TWOFIFTYSIX(num) => { format!("\x1b[38;5;{}m", num) }
+            Color::RGB(r, g, b) => { format!("\x1b[38;2;{};{};{}m", r, g, b) }
+            color => { format!("\x1b[{}m", bg_base + color.to_offset()) }
+        };
+        bg_str
+    }
+
+    fn foreground_string(&self) -> String {
+        let fg_base = if self.bold { 90 } else { 30 };
+        let fg_str = match self.foreground {
+            Color::TWOFIFTYSIX(num) => { format!("\x1b[38;5;{}m", num) }
+            Color::RGB(r, g, b) => { format!("\x1b[38;2;{};{};{}m", r, g, b) }
+            color => { format!("\x1b[{}m", fg_base + color.to_offset()) }
+        };
+        fg_str
+    }
+
     pub fn apply_vt100(&mut self, s: &str) -> anyhow::Result<()> {
         let parm_rx = Regex::new("\x1b\\[([0-9;]+)m").unwrap();
         match parm_rx.captures(s) {
@@ -184,7 +231,7 @@ impl PrintState {
 
 impl Pane {
     pub fn new(id: &str, x: u16, y: u16, height: u16, width: u16) -> Pane {
-        let mut lines = (0..height).map(|_| VT100String::new()).collect::<Vec<VT100String>>();
+        let mut lines = (0..height).map(|_| GlyphString::new()).collect::<Vec<GlyphString>>();
 
         Pane {
             id: String::from(id),
@@ -193,35 +240,170 @@ impl Pane {
             height,
             width,
             lines,
-            cur_x: 0,
-            cur_y: 0,
+            cur_x: 1, // cursor pos is 1-indexed
+            cur_y: 1,
             print_state: PrintState::default(),
+            stream_state: StreamState::new(),
         }
     }
 
     pub fn push(&mut self, s: &str) -> anyhow::Result<()> {
-        let mut vert_line = self.cur_y as usize;
+        self.stream_state.push(s);
 
-        for c in s.chars() {
-            match c {
-                '\n' => {
-                    self.cur_x = 0;
-                    self.cur_y += 1;
-                    if self.cur_y >= self.height as usize {
-                        self.cur_y = (self.height - 1) as usize;
-                        self.lines.remove(0); // discard the topmost line of output
-                        self.lines.push(VT100String::new());
+        for out in self.stream_state.consume() {
+            match out {
+                Plaintext(plain) => {
+                    for c in plain.chars() {
+                        match c {
+                            '\n' => {
+                                // Special char \n creates a new line.
+                                // Advance the cursor and reset to the start position.
+                                self.cur_x = 1;
+                                self.cur_y += 1;
+
+                                println!("Next line: {}", self.cur_y);
+
+                                // If we advance beyond the end of the pane bounds
+                                // discard the topmost line of output and add a new
+                                // line to the end.
+                                if self.cur_y >= self.height as usize {
+                                    self.cur_y = self.height as usize;
+                                    self.lines.remove(0);
+                                    self.lines.push(GlyphString::new());
+                                }
+                            }
+                            _ => {
+                                let vert_line = (self.cur_y - 1) as usize;
+                                let line = self.lines.get_mut(vert_line).unwrap();
+                                line.set(self.cur_x - 1, Glyph::new(c, self.print_state));
+                                self.cur_x += 1;
+                            }
+                        }
                     }
                 }
-                _ => {
-                    let line = self.lines.get_mut(vert_line).unwrap();
-                    line.set(self.cur_x, Glyph::new(c, self.print_state));
-                    self.cur_x += 1;
+                CSI(vt100_code) => {
+                    // Determine the type of escape sequence and either
+                    // 1) Update the print state
+                    // 2) Move the cursor
+                    // 3) Clear some text
+                    // 4) Print to the terminal as if it were plaintext
+                    let last_char = vt100_code.chars().last().unwrap();
+                    match last_char {
+                        'm' => { self.print_state.apply_vt100(&vt100_code)? }
+                        'H' | 'f' | 'A' | 'B' | 'C' | 'D' => {
+                            /* cursor movement */
+                            self.move_cursor(&vt100_code)?
+                        }
+                        'K' | 'J' => {
+                            /* text deletion */
+                            self.delete_text(&vt100_code)?
+                        }
+                        _ => { /* Just print these... I guess */ }
+                    }
                 }
             }
         }
 
         Ok(())
+    }
+
+    fn set_cursor_horz(&mut self, col: usize) {
+        self.cur_x = max(1, min(col, (self.width - 1) as usize));
+    }
+
+    fn set_cursor_vert(&mut self, row: usize) {
+        self.cur_y = max(1, min(row, (self.height - 1) as usize));
+    }
+
+    fn delete_text(&mut self, vt100_code: &str) -> anyhow::Result<()> {
+        let last_char = vt100_code.chars().last().unwrap();
+        match last_char {
+            'K' => {
+                match Pane::deletion_type(vt100_code) {
+                    None => { /*Delete to end of line*/ }
+                    Some(1) => { /* Delete to start of line */ }
+                    Some(2) => { /* Delete entire line*/ }
+                    Some(_) => { /*Invalid*/ }
+                }
+            }
+            'J' => {
+                match Pane::deletion_type(vt100_code) {
+                    None => { /*Delete to end of screen*/ }
+                    Some(1) => { /* Delete to start of screen */ }
+                    Some(2) => { /* Clear screen */ }
+                    Some(_) => { /*Invalid*/ }
+                }
+            }
+            _ => { /* Not a text deletion */ }
+        }
+        Ok(())
+    }
+
+    fn move_cursor(&mut self, vt100_code: &str) -> anyhow::Result<()> {
+        let last_char = vt100_code.chars().last().unwrap();
+        match last_char {
+            'H' | 'f' => {
+                let home_regex = Regex::new("\x1b\\[(\\d*);?(\\d*).")?;
+                let captures = home_regex.captures(vt100_code).unwrap();
+                println!("Captures: {:?}", captures);
+                let row = match captures.get(1) {
+                    None => { 0 }
+                    Some(m) => { m.as_str().to_owned().parse::<usize>().unwrap_or(0) }
+                };
+                let col = match captures.get(2) {
+                    None => { 0 }
+                    Some(m) => { m.as_str().to_owned().parse::<usize>().unwrap_or(0) }
+                };
+
+                self.set_cursor_horz(col);
+                self.set_cursor_vert(row);
+            }
+
+            'A' => {
+                let up = Pane::cursor_move_amount(vt100_code)?;
+                self.set_cursor_vert(self.cur_y - up)
+            }
+            'B' => {
+                let down = Pane::cursor_move_amount(vt100_code)?;
+                self.set_cursor_vert(self.cur_y + down)
+            }
+            'C' => {
+                let right = Pane::cursor_move_amount(vt100_code)?;
+                self.set_cursor_horz(self.cur_x + right)
+            }
+            'D' => {
+                let left = Pane::cursor_move_amount(vt100_code)?;
+                self.set_cursor_horz(self.cur_x - left)
+            }
+            /*****
+            TODO: Save/Restore cursor states
+             */
+            // ^[s/^[u => save/restore cursor position
+            // ^7/^8 => save/restore cursor pos + print state
+            _ => {} // No movement to do!
+        }
+
+        Ok(())
+    }
+
+    fn cursor_move_amount(vt100_code: &str) -> anyhow::Result<usize> {
+        let cur_move_regex = Regex::new("\x1b\\[(\\d*).")?;
+        let captures = cur_move_regex.captures(vt100_code).unwrap();
+        let out = match captures.get(1) {
+            None => { 1 }
+            Some(m) => { m.as_str().to_owned().parse::<usize>().unwrap_or(1) }
+        };
+
+        Ok(out)
+    }
+
+    fn deletion_type(vt100_code: &str) -> Option<usize> {
+        let cur_move_regex = Regex::new("\x1b\\[(\\d*).").unwrap();
+        let captures = cur_move_regex.captures(vt100_code).unwrap();
+        match captures.get(1) {
+            None => { None }
+            Some(m) => { Some(m.as_str().to_owned().parse::<usize>().unwrap()) }
+        }
     }
 
     // A Handle for testing
@@ -251,17 +433,113 @@ mod tests {
     fn it_moves_the_cursor_horizontally_after_writing() {
         let mut pane = Pane::new("p1", 1, 1, 10, 20);
         pane.push("a line of text").unwrap();
-        assert_eq!(0, pane.cur_y);
-        assert_eq!(14, pane.cur_x);
+        assert_eq!(1, pane.cur_y);
+        assert_eq!(15, pane.cur_x);
     }
 
     #[test]
     fn it_moves_the_cursor_vertically_after_newline() {
         let mut pane = Pane::new("p1", 1, 1, 10, 20);
         pane.push("two lines\nof text").unwrap();
-        assert_eq!(1, pane.cur_y);
+        assert_eq!(2, pane.cur_y);
+        assert_eq!(8, pane.cur_x);
+    }
+
+    /***
+    Cursor movement tests
+     */
+    #[test]
+    fn it_moves_the_cursor_using_vt100_codes() {
+        let mut pane = Pane::new("p1", 1, 1, 10, 20);
+        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
+
+        assert_eq!(5, pane.cur_y);
         assert_eq!(7, pane.cur_x);
     }
+
+    #[test]
+    fn it_moves_the_cursor_up_using_vt100_codes() {
+        let mut pane = Pane::new("p1", 1, 1, 10, 20);
+        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
+        pane.push("\x1b[2A");
+        pane.push("\x1b[A");
+        assert_eq!(2, pane.cur_y);
+        assert_eq!(7, pane.cur_x);
+    }
+
+    #[test]
+    fn it_moves_the_cursor_down_using_vt100_codes() {
+        let mut pane = Pane::new("p1", 1, 1, 10, 20);
+        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
+        pane.push("\x1b[2B");
+        pane.push("\x1b[B");
+        assert_eq!(8, pane.cur_y);
+        assert_eq!(7, pane.cur_x);
+    }
+
+    #[test]
+    fn it_moves_the_cursor_right_using_vt100_codes() {
+        let mut pane = Pane::new("p1", 1, 1, 10, 20);
+        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
+        pane.push("\x1b[2C");
+        pane.push("\x1b[C");
+        assert_eq!(5, pane.cur_y);
+        assert_eq!(10, pane.cur_x);
+    }
+
+    #[test]
+    fn it_moves_the_cursor_left_using_vt100_codes() {
+        let mut pane = Pane::new("p1", 1, 1, 10, 20);
+        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
+        pane.push("\x1b[2D");
+        pane.push("\x1b[D");
+        assert_eq!(5, pane.cur_y);
+        assert_eq!(4, pane.cur_x);
+    }
+
+    #[test]
+    fn it_moves_the_cursor_and_still_prints_using_vt100_codes() {
+        let mut pane = Pane::new("p1", 1, 1, 10, 20);
+
+        // Initial state, let's have a box
+        //   AAAAA
+        //   BBBBB
+        //   CCCCC
+        //
+        // Then use cursor movements to set the top-left and top right to X, the center to O
+        // and the bottom to alternate COCOC
+
+        pane.push("AAAAA\nBBBBB\nCCCCC").unwrap();
+        println!("{}", pane.plaintext());
+
+        pane.push("\x1b[H").unwrap(); // Home
+        pane.push("X"); // X in top left
+        pane.push("\x1b[1;5H").unwrap();
+        pane.push("X"); // X in top Right
+
+        println!("{}", pane.plaintext());
+
+        // Should have XAAAX in the top row now and cursor is at 1,6
+        // Move down and left
+        pane.push("\x1b[B").unwrap(); // down one
+        pane.push("\x1b[3D").unwrap(); // left 3
+        pane.push("O").unwrap();
+
+        println!("{}", pane.plaintext());
+
+        // Second row should now be BBOBB and cursor is at 1,4
+        // jump to the left and down one
+        pane.push("\x1b[3;1f").unwrap(); // row 3, col 1
+        pane.push("\x1b[1C").unwrap(); // right one
+        pane.push("_");
+        pane.push("\x1b[C").unwrap(); // right one
+        pane.push("_");
+
+        println!("{}", pane.plaintext());
+
+        assert_eq!("XAAAX\nBBOBB\nC_C_C\n\n\n\n\n\n\n", pane.plaintext());
+    }
+
 
     /***
     PrintState Tests
@@ -315,7 +593,37 @@ mod tests {
         ps.apply_vt100(fg_code).unwrap();
         ps.apply_vt100(bg_code).unwrap();
 
-        assert_eq!(ps.to_str(), fg_code.to_owned()+bg_code);
+        assert_eq!(ps.to_str(), fg_code.to_owned() + bg_code);
+    }
+
+    #[test]
+    fn it_finds_diff_between_states() {
+        let mut red_on_black = PrintState::default();
+        red_on_black.apply_vt100("\x1b[33m");
+
+        let mut red_on_cyan = PrintState::default();
+        red_on_cyan.apply_vt100("\x1b[33m").unwrap();
+        red_on_cyan.apply_vt100("\x1b[46m");
+
+        assert_eq!(red_on_black.diff_str(&red_on_cyan), "\x1b[46m");
+    }
+
+    #[test]
+    fn it_sends_reset_when_underline_turns_off() {
+        let mut default = PrintState::default();
+        let mut underlined = PrintState::default();
+        underlined.apply_vt100("\x1b[4m").unwrap();
+
+        assert_eq!(underlined.diff_str(&default), "\x1b[0m".to_owned() + &default.to_str());
+    }
+
+    #[test]
+    fn it_sends_reset_when_blink_turns_off() {
+        let mut default = PrintState::default();
+        let mut blinking = PrintState::default();
+        blinking.apply_vt100("\x1b[5m").unwrap();
+
+        assert_eq!(blinking.diff_str(&default), "\x1b[0m".to_owned() + &default.to_str());
     }
 }
 

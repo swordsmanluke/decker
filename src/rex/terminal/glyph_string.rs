@@ -3,7 +3,7 @@ use regex::{Regex};
 use std::cmp::{max};
 use crate::rex::terminal::pane::PrintState;
 
-pub struct VT100String {
+pub struct GlyphString {
     glyphs: Vec<Glyph>
 }
 
@@ -32,10 +32,10 @@ lazy_static! {
     static ref VT100_REGEX: Regex = Regex::new(r"((\u001b\[|\u009b)[\u0030-\u003f]*[\u0020-\u002f]*[\u0040-\u007e])+").unwrap();
 }
 
-impl VT100String {
+impl GlyphString {
 
-    pub fn new() -> VT100String {
-        VT100String {
+    pub fn new() -> GlyphString {
+        GlyphString {
             glyphs: Vec::new()
         }
     }
