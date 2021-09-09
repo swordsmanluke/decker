@@ -1,19 +1,14 @@
-mod vt100_translator;
+mod pane_manager;
 mod glyph_string;
-mod pane;
+pub(crate) mod pane;
 mod internal;
 
 use std::collections::HashMap;
 use crate::rex::TaskId;
-use crate::rex::terminal::internal::StreamState;
+use crate::rex::terminal::pane::Pane;
 
-pub struct Vt100Translator {
-    streams: HashMap<TaskId, StreamState>,
-}
-
-pub struct View {
-    pub location: TerminalLocation,
-    pub dimensions: TerminalSize
+pub struct PaneManager {
+    panes: HashMap<TaskId, Pane>,
 }
 
 pub struct TerminalLocation {

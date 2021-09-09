@@ -1,33 +1,33 @@
 use crate::rex::TaskId;
 use regex::Regex;
-use crate::rex::terminal::{Vt100Translator, TerminalLocation, View, TerminalSize};
+use crate::rex::terminal::{PaneManager, TerminalLocation, TerminalSize};
 use std::io::Write;
 use log::info;
 use crate::rex::terminal::internal::StreamState;
+use crate::rex::terminal::pane::Pane;
 
-impl Vt100Translator {
-    pub fn new() -> Vt100Translator {
-        Vt100Translator {
-            streams: Default::default()
+impl PaneManager {
+    pub fn new() -> PaneManager {
+        PaneManager {
+            panes: Default::default()
         }
     }
 
-    pub fn register(&mut self, task_id: TaskId, view: View) {
-        let ss = StreamState::new();
-        self.streams.insert(task_id, ss);
+    pub fn register(&mut self, task_id: TaskId, pane: Pane) {
+        self.panes.insert(task_id, pane);
     }
 
     pub fn write(&mut self, target: &mut dyn Write) {
-        for (task_id, stream_state) in self.streams.iter_mut() {
+        for (task_id, pane) in self.panes.iter_mut() {
             info!("Writing output for {}", task_id);
-            // write!(target, "{}", stream_state.consume().clone());
+            pane.write(target).unwrap();
         }
     }
 
     pub fn push(&mut self, task_id: TaskId, data: &String) {
-        match self.streams.get_mut(&task_id) {
+        match self.panes.get_mut(&task_id) {
             None => {  info!("Received output for unregistered task {}", &task_id); } // Drop data for unknown tasks
-            Some(stream_state) => { stream_state.push(data) }
+            Some(pane) => { pane.push(data).unwrap(); }
         }
     }
 }

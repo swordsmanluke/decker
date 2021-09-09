@@ -5,7 +5,8 @@ use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::IntoRawMode;
 use crate::rex::{Task, MasterControl, TaskId};
-use crate::rex::terminal::{Vt100Translator, View, TerminalLocation, TerminalSize};
+use crate::rex::terminal::pane::Pane;
+use crate::rex::terminal::{PaneManager, TerminalLocation, TerminalSize};
 
 mod rex;
 
@@ -32,33 +33,39 @@ fn run() -> anyhow::Result<()> {
 
     let input_tx = mcp.input_tx();
 
-    mcp.execute(&"bash".to_string())?;
-    mcp.activate_proc(&"bash".to_string())?;
+    let task_id: TaskId = "bash".into();
+
+    mcp.execute(&task_id.to_string())?;
+    mcp.activate_proc(&task_id)?;
+
+    let pane = Pane::new("bash", 5, 5, 10, 24);
+    let mut pane_manager = PaneManager::new();
+    pane_manager.register(task_id, pane);
+    let mut input = String::new();
+
+    println!("\x1b[2J"); // clear screen before we begin
 
     loop {
-        // read stdin and forward it to the proc.
-        let mut input = String::new();
-        let mut translator = Vt100Translator::new();
-        let task_id: TaskId = "bash".into();
-        let v = View { location: TerminalLocation::new(3, 5), dimensions: TerminalSize::new(24, 80) };
-        translator.register(task_id, v);
+        // read stdin and forward it to the active proc.
         stdin.read_to_string(&mut input)?;
         if !input.is_empty() {
             info!("Sending input: {}", input);
-            input_tx.send(input)?;
+            input_tx.send(input.clone())?;
+            input.clear();
         }
 
         // read stdout and display it
         let output = read_output(&mut output_rx)?;
         match output {
             Some(pout) => {
-                translator.push(pout.name, &pout.output);
-                translator.write(&mut stdout);
+                pane_manager.push(pout.name, &pout.output);
+                pane_manager.write(&mut stdout);
                 stdout.flush()?;
             }
             None => {}
         }
     }
+    // uncomment after making an exit function
     // Ok(())
 }
 
