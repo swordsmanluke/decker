@@ -5,6 +5,7 @@ use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
 use std::cmp::{min, max};
 use std::io::Write;
 use log::info;
+use anyhow::bail;
 
 pub struct Pane {
     id: String,
@@ -21,7 +22,7 @@ pub struct Pane {
     cursor: Cursor,
 
     // current print state
-    print_state: PrintState,
+    print_state: PrintStyle,
 
     // Input buffer
     stream_state: StreamState,
@@ -42,9 +43,10 @@ pub enum Color {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub struct PrintState {
+pub struct PrintStyle {
     pub foreground: Color,
     pub background: Color,
+    pub italicized: bool,
     pub underline: bool,
     pub blink: bool,
     pub bold: bool,
@@ -123,16 +125,17 @@ impl Color {
         match args.first().unwrap() {
             2 => { Ok(Color::RGB(args[1], args[2], args[3])) }
             5 => { Ok(Color::TWOFIFTYSIX(args[1])) }
-            _ => { panic!("{} is not a valid SGR extended color argument!", args.first().unwrap()) }
+            _ => { bail!("{} is not a valid SGR extended color argument!", args.first().unwrap()) }
         }
     }
 }
 
-impl Default for PrintState {
+impl Default for PrintStyle {
     fn default() -> Self {
-        PrintState {
+        PrintStyle {
             foreground: Color::White,
             background: Color::Black,
+            italicized: false,
             underline: false,
             blink: false,
             bold: false,
@@ -140,11 +143,11 @@ impl Default for PrintState {
     }
 }
 
-impl PrintState {
+impl PrintStyle {
     /****
     Returns the VT100 codes required to transform self -> other, but does not mutate
      */
-    pub fn diff_str(&self, other: &PrintState) -> String {
+    pub fn diff_str(&self, other: &PrintStyle) -> String {
         let mut out = String::new();
 
         if self.foreground != other.foreground {
@@ -155,11 +158,19 @@ impl PrintState {
             out += &other.background_string();
         }
 
-        if self.underline != other.underline || self.blink != other.blink {
-            // Can't turn these "off" easily, so we have to reset to default
-            // and then apply the new state.
-            out = String::from("\x1b[0m");
-            out += &other.to_str();
+        if self.underline != other.underline {
+            if other.underline { out += "\x1b[4m" }
+            else { out += "\x1b[24m" }
+        }
+
+        if self.blink != other.blink {
+            if other.blink { out += "\x1b[5m" }
+            else { out += "\x1b[25m" }
+        }
+
+        if self.italicized != other.italicized {
+            if other.italicized { out += "\x1b[3m" }
+            else { out += "\x1b[23m" }
         }
 
         out
@@ -184,10 +195,17 @@ impl PrintState {
             ""
         };
 
+        let italicized = if self.italicized {
+            "\x1b[3m"
+        } else {
+            ""
+        };
+
         let mut out = String::from(fg_str);
         out.push_str(&bg_str);
         out.push_str(&blink);
         out.push_str(&underlined);
+        out.push_str(&italicized);
 
         out
     }
@@ -213,9 +231,9 @@ impl PrintState {
     }
 
     pub fn apply_vt100(&mut self, s: &str) -> anyhow::Result<()> {
-        let parm_rx = Regex::new("\x1b\\[([0-9;]+)m").unwrap();
+        let parm_rx = Regex::new("\x1b\\[([0-9;]+)%?m").unwrap();
         match parm_rx.captures(s) {
-            None => { panic!("{} does not look like an SGR sequence!", s) }
+            None => { bail!("'{}' does not look like an SGR sequence!", s) }
             Some(captures) => {
                 let mut int_parts: Vec<u8> = captures.get(1).unwrap().as_str().
                     split(";").
@@ -234,8 +252,13 @@ impl PrintState {
                     }
                     1 => { self.bold = true; }
                     2 => { self.bold = false; }
+                    3 => { self.italicized = true;}
                     4 => { self.underline = true; }
                     5 => { self.blink = true; }
+                    22 => { self.bold = false; }
+                    23 => { self.italicized = false; }
+                    24 => { self.underline = false; }
+                    25 => { self.blink = false; }
                     30..=37 => { self.foreground = Color::eight_color(*sgr_code); }
                     38 => { self.foreground = Color::extended_color(&int_parts[1..])? }
                     40..=47 => { self.background = Color::eight_color(*sgr_code); }
@@ -271,7 +294,7 @@ impl Pane {
             width,
             lines,
             cursor: Cursor::new(),
-            print_state: PrintState::default(),
+            print_state: PrintStyle::default(),
             stream_state: StreamState::new(),
         }
     }
@@ -287,7 +310,6 @@ impl Pane {
                     for c in plain.chars() {
                         match c {
                             '\n' => {
-                                info!("Newline. Jump from line {} to {}", self.cursor.y, self.cursor.y + 1);
                                 // Special char \n creates a new line.
                                 // Advance the cursor and reset to the start position.
                                 self.cursor.set_x(1);
@@ -297,14 +319,11 @@ impl Pane {
                                 // discard the topmost line of output and add a new
                                 // line to the end.
                                 if self.cursor.y >= self.height {
-                                    info!("Scroll!");
                                     self.cursor.set_y(self.height);
-                                    info!("Pop off: {}", self.lines.remove(0).plaintext());
                                     self.lines.push(GlyphString::new());
                                 }
                             }
                             '\r' => {
-                                info!("Return");
                                 // Return to the start of this line!
                                 self.cursor.set_x(1);
                             }
@@ -313,9 +332,7 @@ impl Pane {
                                 let vert_line = self.cursor.y - 1;
                                 let line = self.lines.get_mut(vert_line as usize).unwrap();
                                 line.set((self.cursor.x - 1) as usize, Glyph::new(c, self.print_state));
-                                info!("Increment cursor x");
                                 self.cursor.incr_x(1);
-                                info!("Cursor pos: {}x {}y", self.cursor.x, self.cursor.y);
                             }
                         }
                     }
@@ -351,7 +368,6 @@ impl Pane {
         let mut line_idx = 0;
 
         self.lines.iter().for_each(|line| {
-            info!("Writing {} line {}", self.id, line_idx);
             let ps = self.print_state.clone();
             line.write(self.x, self.y + line_idx, ps, target).unwrap();
             line_idx +=1;
@@ -459,7 +475,7 @@ impl Pane {
         let captures = cur_move_regex.captures(vt100_code).unwrap();
         match captures.get(1) {
             None => { None }
-            Some(m) => { Some(m.as_str().to_owned().parse::<u16>().unwrap()) }
+            Some(m) => { if m.as_str().is_empty() { None} else { Some(m.as_str().to_owned().parse::<u16>().unwrap()) }}
         }
     }
 
@@ -601,7 +617,7 @@ mod tests {
     #[test]
     fn it_converts_simple_vt100_sgr_to_print_state() {
         let code = "\x1b[33m";
-        let mut ps = PrintState::default();
+        let mut ps = PrintStyle::default();
         ps.apply_vt100(code).unwrap();
         assert_eq!(ps.foreground, Color::Yellow);
     }
@@ -609,7 +625,7 @@ mod tests {
     #[test]
     fn it_converts_bold_vt100_sgr_to_print_state() {
         let code = "\x1b[93m";
-        let mut ps = PrintState::default();
+        let mut ps = PrintStyle::default();
         ps.apply_vt100(code).unwrap();
         assert_eq!(ps.foreground, Color::Yellow);
         assert_eq!(ps.bold, true);
@@ -618,7 +634,7 @@ mod tests {
     #[test]
     fn it_converts_background_vt100_sgr_to_print_state() {
         let code = "\x1b[43m";
-        let mut ps = PrintState::default();
+        let mut ps = PrintStyle::default();
         ps.apply_vt100(code).unwrap();
         assert_eq!(ps.background, Color::Yellow);
     }
@@ -626,7 +642,7 @@ mod tests {
     #[test]
     fn it_converts_256_color_vt100_sgr_to_print_state() {
         let code = "\x1b[38;5;128m";
-        let mut ps = PrintState::default();
+        let mut ps = PrintStyle::default();
         ps.apply_vt100(code).unwrap();
         assert_eq!(ps.foreground, Color::TWOFIFTYSIX(128));
     }
@@ -634,7 +650,7 @@ mod tests {
     #[test]
     fn it_converts_rgb_color_vt100_sgr_to_print_state() {
         let code = "\x1b[38;2;128;42;255m";
-        let mut ps = PrintState::default();
+        let mut ps = PrintStyle::default();
         ps.apply_vt100(code).unwrap();
         assert_eq!(ps.foreground, Color::RGB(128, 42, 255));
     }
@@ -643,7 +659,7 @@ mod tests {
     fn it_converts_state_back_into_vt100() {
         let fg_code = "\x1b[38;2;128;42;255m";
         let bg_code = "\x1b[47m";
-        let mut ps = PrintState::default();
+        let mut ps = PrintStyle::default();
         ps.apply_vt100(fg_code).unwrap();
         ps.apply_vt100(bg_code).unwrap();
 
@@ -652,10 +668,10 @@ mod tests {
 
     #[test]
     fn it_finds_diff_between_states() {
-        let mut red_on_black = PrintState::default();
+        let mut red_on_black = PrintStyle::default();
         red_on_black.apply_vt100("\x1b[33m");
 
-        let mut red_on_cyan = PrintState::default();
+        let mut red_on_cyan = PrintStyle::default();
         red_on_cyan.apply_vt100("\x1b[33m").unwrap();
         red_on_cyan.apply_vt100("\x1b[46m");
 
@@ -663,21 +679,30 @@ mod tests {
     }
 
     #[test]
-    fn it_sends_reset_when_underline_turns_off() {
-        let mut default = PrintState::default();
-        let mut underlined = PrintState::default();
+    fn it_turns_off_underline() {
+        let mut default = PrintStyle::default();
+        let mut underlined = PrintStyle::default();
         underlined.apply_vt100("\x1b[4m").unwrap();
 
-        assert_eq!(underlined.diff_str(&default), "\x1b[0m".to_owned() + &default.to_str());
+        assert_eq!(underlined.diff_str(&default), "\x1b[24m".to_owned());
     }
 
     #[test]
-    fn it_sends_reset_when_blink_turns_off() {
-        let mut default = PrintState::default();
-        let mut blinking = PrintState::default();
+    fn it_turns_off_blink() {
+        let mut default = PrintStyle::default();
+        let mut blinking = PrintStyle::default();
         blinking.apply_vt100("\x1b[5m").unwrap();
 
-        assert_eq!(blinking.diff_str(&default), "\x1b[0m".to_owned() + &default.to_str());
+        assert_eq!(blinking.diff_str(&default), "\x1b[25m".to_owned());
+    }
+
+    #[test]
+    fn it_turns_off_italics() {
+        let mut default = PrintStyle::default();
+        let mut blinking = PrintStyle::default();
+        blinking.apply_vt100("\x1b[3m").unwrap();
+
+        assert_eq!(blinking.diff_str(&default), "\x1b[23m".to_owned());
     }
 }
 

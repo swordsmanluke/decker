@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use regex::{Regex};
 use std::cmp::{max};
-use crate::rex::terminal::pane::PrintState;
+use crate::rex::terminal::pane::PrintStyle;
 use std::io::Write;
 use log::info;
 
@@ -12,11 +12,11 @@ pub struct GlyphString {
 #[derive(Copy, Clone, Debug)]
 pub struct Glyph {
     c: char,
-    state: PrintState,
+    state: PrintStyle,
 }
 
 impl Glyph {
-    pub fn new(c: char, state: PrintState) -> Self {
+    pub fn new(c: char, state: PrintStyle) -> Self {
         Glyph { c, state }
     }
 }
@@ -25,7 +25,7 @@ impl Default for Glyph {
     fn default() -> Self {
         Glyph {
             c: ' ',
-            state: PrintState::default(),
+            state: PrintStyle::default(),
         }
     }
 }
@@ -51,7 +51,7 @@ impl GlyphString {
         self.glyphs[index] = g;
     }
 
-    pub fn push(&mut self, s: &str, style: &PrintState) {
+    pub fn push(&mut self, s: &str, style: &PrintStyle) {
         let mut i = self.glyphs.len();
         for c in s.chars() {
             self.set(i, Glyph::new(c, style.clone()));
@@ -59,7 +59,7 @@ impl GlyphString {
         }
     }
 
-    pub fn write(&self, x_offset: u16, y_offset: u16, cur_style: PrintState, target: &mut dyn Write) -> anyhow::Result<()> {
+    pub fn write(&self, x_offset: u16, y_offset: u16, cur_style: PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
         // TODO: Determine if we're dirty before deciding whether to print ourselves!
 
         // goto the offset for our line
@@ -96,7 +96,7 @@ impl GlyphString {
         self.glyphs.iter().map(|g| g.c.to_string()).collect::<Vec<String>>().join(" ")
     }
 
-    pub fn to_str(&self, current_state: &PrintState) -> String {
+    pub fn to_str(&self, current_state: &PrintStyle) -> String {
         let mut current_state = current_state;
         let mut s = String::new();
         for g in &self.glyphs {
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn it_writes_lines_at_offset() {
         let mut g = GlyphString::new();
-        let ps = PrintState::default();
+        let ps = PrintStyle::default();
 
         g.push("a line of text", &ps);
 
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn it_respects_glyph_styles() {
         let mut g = GlyphString::new();
-        let mut ps = PrintState::default();
+        let mut ps = PrintStyle::default();
         ps.apply_vt100("\x1b[32m");
 
         g.push("a line", &ps);
