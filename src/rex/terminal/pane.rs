@@ -375,7 +375,9 @@ impl Pane {
                                 => {
                                     // All of these can be managed by the
                                     // top level terminal emulator...
-                                    print!("{}", vt100_code);
+                                    if vt100_code != "\x1b[?25l" {  /* hide cursor */
+                                        print!("{}", vt100_code);
+                                    }
                                 }
                                 // Alternate screen
                                 "\x1b[?1049h" => {
