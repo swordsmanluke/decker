@@ -1,10 +1,10 @@
 use crate::rex::terminal::glyph_string::{GlyphString, Glyph};
-use regex::{Regex, Captures, Match};
-use crate::rex::terminal::internal::{StreamState, TerminalOutput};
+use regex::Regex;
+use crate::rex::terminal::internal::StreamState;
 use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
 use std::cmp::{min, max};
 use std::io::Write;
-use log::info;
+use log::{info, warn, error};
 use anyhow::bail;
 
 pub struct Pane {
@@ -59,7 +59,6 @@ struct Cursor {
 
 impl Cursor {
     pub fn set_x(&mut self, n: u16) {
-        info!("Changing cursor x from {} to {}", self.x, n);
         self.x = n
     }
 
@@ -235,7 +234,7 @@ impl PrintStyle {
         match parm_rx.captures(s) {
             None => { bail!("'{}' does not look like an SGR sequence!", s) }
             Some(captures) => {
-                let mut int_parts: Vec<u8> = captures.get(1).unwrap().as_str().
+                let int_parts: Vec<u8> = captures.get(1).unwrap().as_str().
                     split(";").
                     map(|a| a.to_string().parse::<u8>().unwrap()).
                     collect();
@@ -284,7 +283,7 @@ impl PrintStyle {
 
 impl Pane {
     pub fn new(id: &str, x: u16, y: u16, height: u16, width: u16) -> Pane {
-        let mut lines = (0..height).map(|_| GlyphString::new()).collect::<Vec<GlyphString>>();
+        let lines = (0..height).map(|_| GlyphString::new()).collect::<Vec<GlyphString>>();
 
         Pane {
             id: String::from(id),
@@ -369,23 +368,23 @@ impl Pane {
 
         self.lines.iter().for_each(|line| {
             let ps = self.print_state.clone();
-            line.write(self.x, self.y + line_idx, ps, target).unwrap();
+            line.write(self.x, self.y + line_idx, self.width,ps, target).unwrap();
             line_idx +=1;
         });
 
         // put cursor where it belongs
         info!("After printing, cursor is at {}x{}y", self.cursor.x, self.cursor.y);
-        write!(target, "\x1b[{};{}H", self.cursor.y + self.y - 1, self.cursor.x + self.x - 1);
+        write!(target, "\x1b[{};{}H", self.cursor.y + self.y - 1, self.cursor.x + self.x - 1)?;
 
         Ok(())
     }
 
     fn set_cursor_horz(&mut self, col: u16) {
-        self.cursor.set_x(max(1, min(col, (self.width - 1))));
+        self.cursor.set_x(max(1, min(col, self.width - 1)));
     }
 
     fn set_cursor_vert(&mut self, row: u16) {
-        self.cursor.set_y(max(1, min(row, (self.height - 1))));
+        self.cursor.set_y(max(1, min(row, self.height - 1)));
     }
 
     fn delete_text(&mut self, vt100_code: &str) -> anyhow::Result<()> {
@@ -393,18 +392,56 @@ impl Pane {
         match last_char {
             'K' => {
                 match Pane::deletion_type(vt100_code) {
-                    None => { /*Delete to end of line*/ }
-                    Some(1) => { /* Delete to start of line */ }
-                    Some(2) => { /* Delete entire line*/ }
-                    Some(_) => { /*Invalid*/ }
+                    None => { /*Delete to end of line*/
+                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        line.clear_after(self.cursor.x as usize);
+                    }
+                    Some(1) => { /* Delete to start of line */
+                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        line.clear_to(self.cursor.x as usize);
+                    }
+                    Some(2) => { /* Delete entire line*/
+                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        line.clear();
+                    }
+                    Some(i) => { /*Invalid*/
+                        error!("Unknown 'line delete' type '{}'. Ignoring!", i)
+                    }
                 }
             }
             'J' => {
                 match Pane::deletion_type(vt100_code) {
-                    None => { /*Delete to end of screen*/ }
-                    Some(1) => { /* Delete to start of screen */ }
-                    Some(2) => { /* Clear screen */ }
-                    Some(_) => { /*Invalid*/ }
+                    None => { /*Delete to end of screen*/
+                        // Clear the current line
+                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        line.clear_after(self.cursor.x as usize);
+
+                        //... and then the remainder of the screen
+                        for line_idx in (self.cursor.y + 1)..self.height {
+                            let line = self.lines.get_mut(line_idx as usize).unwrap();
+                            line.clear();
+                        }
+                    }
+                    Some(1) => { /* Delete to start of screen */
+                        // Clear the current line
+                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        line.clear_to(self.cursor.x as usize);
+
+                        //... and then the top of the screen on down
+                        for line_idx in 0..self.cursor.y {
+                            let line = self.lines.get_mut(line_idx as usize).unwrap();
+                            line.clear();
+                        }
+                    }
+                    Some(2) => { /* Clear screen */
+                        for line_idx in 0..self.height {
+                            let line = self.lines.get_mut(line_idx as usize).unwrap();
+                            line.clear();
+                        }
+                    }
+                    Some(i) => { /*Invalid*/
+                        error!("Unknown 'screen delete' type '{}'. Ignoring!", i)
+                    }
                 }
             }
             _ => { /* Not a text deletion */ }
@@ -534,8 +571,8 @@ mod tests {
     fn it_moves_the_cursor_up_using_vt100_codes() {
         let mut pane = Pane::new("p1", 1, 1, 10, 20);
         pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
-        pane.push("\x1b[2A");
-        pane.push("\x1b[A");
+        pane.push("\x1b[2A").unwrap();
+        pane.push("\x1b[A").unwrap();
         assert_eq!(2, pane.cursor.y);
         assert_eq!(7, pane.cursor.x);
     }
@@ -544,8 +581,8 @@ mod tests {
     fn it_moves_the_cursor_down_using_vt100_codes() {
         let mut pane = Pane::new("p1", 1, 1, 10, 20);
         pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
-        pane.push("\x1b[2B");
-        pane.push("\x1b[B");
+        pane.push("\x1b[2B").unwrap();
+        pane.push("\x1b[B").unwrap();
         assert_eq!(8, pane.cursor.y);
         assert_eq!(7, pane.cursor.x);
     }
@@ -554,8 +591,8 @@ mod tests {
     fn it_moves_the_cursor_right_using_vt100_codes() {
         let mut pane = Pane::new("p1", 1, 1, 10, 20);
         pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
-        pane.push("\x1b[2C");
-        pane.push("\x1b[C");
+        pane.push("\x1b[2C").unwrap();
+        pane.push("\x1b[C").unwrap();
         assert_eq!(5, pane.cursor.y);
         assert_eq!(10, pane.cursor.x);
     }
@@ -564,8 +601,8 @@ mod tests {
     fn it_moves_the_cursor_left_using_vt100_codes() {
         let mut pane = Pane::new("p1", 1, 1, 10, 20);
         pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
-        pane.push("\x1b[2D");
-        pane.push("\x1b[D");
+        pane.push("\x1b[2D").unwrap();
+        pane.push("\x1b[D").unwrap();
         assert_eq!(5, pane.cursor.y);
         assert_eq!(4, pane.cursor.x);
     }
@@ -585,9 +622,9 @@ mod tests {
         pane.push("AAAAA\nBBBBB\nCCCCC").unwrap();
 
         pane.push("\x1b[H").unwrap(); // Home
-        pane.push("X"); // X in top left
+        pane.push("X").unwrap(); // X in top left
         pane.push("\x1b[1;5H").unwrap();
-        pane.push("X"); // X in top Right
+        pane.push("X").unwrap(); // X in top Right
 
         // Should have XAAAX in the top row now and cursor is at 1,6
         // Move down and left
@@ -599,13 +636,9 @@ mod tests {
         // jump to the left and down one
         pane.push("\x1b[3;1f").unwrap(); // row 3, col 1
         pane.push("\x1b[1C").unwrap(); // right one
-        pane.push("_");
+        pane.push("_").unwrap();
         pane.push("\x1b[C").unwrap(); // right one
-        pane.push("_");
-
-        let mut out = Vec::new();
-        pane.write(&mut out);
-        let output = std::str::from_utf8(&out).unwrap();
+        pane.push("_").unwrap();
 
         assert_eq!("XAAAX\nBBOBB\nC_C_C\n\n\n\n\n\n\n", pane.plaintext());
     }
@@ -669,18 +702,18 @@ mod tests {
     #[test]
     fn it_finds_diff_between_states() {
         let mut red_on_black = PrintStyle::default();
-        red_on_black.apply_vt100("\x1b[33m");
+        red_on_black.apply_vt100("\x1b[33m").unwrap();
 
         let mut red_on_cyan = PrintStyle::default();
         red_on_cyan.apply_vt100("\x1b[33m").unwrap();
-        red_on_cyan.apply_vt100("\x1b[46m");
+        red_on_cyan.apply_vt100("\x1b[46m").unwrap();
 
         assert_eq!(red_on_black.diff_str(&red_on_cyan), "\x1b[46m");
     }
 
     #[test]
     fn it_turns_off_underline() {
-        let mut default = PrintStyle::default();
+        let default = PrintStyle::default();
         let mut underlined = PrintStyle::default();
         underlined.apply_vt100("\x1b[4m").unwrap();
 
@@ -689,7 +722,7 @@ mod tests {
 
     #[test]
     fn it_turns_off_blink() {
-        let mut default = PrintStyle::default();
+        let default = PrintStyle::default();
         let mut blinking = PrintStyle::default();
         blinking.apply_vt100("\x1b[5m").unwrap();
 
@@ -698,7 +731,7 @@ mod tests {
 
     #[test]
     fn it_turns_off_italics() {
-        let mut default = PrintStyle::default();
+        let default = PrintStyle::default();
         let mut blinking = PrintStyle::default();
         blinking.apply_vt100("\x1b[3m").unwrap();
 

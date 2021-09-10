@@ -6,7 +6,7 @@ use std::fs::File;
 use termion::raw::IntoRawMode;
 use crate::rex::{Task, MasterControl, TaskId};
 use crate::rex::terminal::pane::Pane;
-use crate::rex::terminal::{PaneManager, TerminalLocation, TerminalSize};
+use crate::rex::terminal::PaneManager;
 
 mod rex;
 
@@ -29,16 +29,18 @@ fn run() -> anyhow::Result<()> {
 
     let (output_tx, mut output_rx) = channel();
     let mut mcp = MasterControl::new(output_tx);
-    mcp.register(Task::new("bash", "bash", "bash") )?;
 
     let input_tx = mcp.input_tx();
 
     let task_id: TaskId = "bash".into();
+    let height: u16 = 24;
+    let width: u16 = 80;
+    let pane = Pane::new(&task_id, 5, 5, height, width);
 
+    mcp.register(Task::new(&task_id, &task_id, "bash", height, width) )?;
     mcp.execute(&task_id.to_string())?;
     mcp.activate_proc(&task_id)?;
 
-    let pane = Pane::new("bash", 5, 5, 10, 24);
     let mut pane_manager = PaneManager::new();
     pane_manager.register(task_id, pane);
     let mut input = String::new();

@@ -48,6 +48,7 @@ impl ChildProcess {
     Launches the child's process and runs until the process exits
     ***/
     pub fn run(&mut self) -> anyhow::Result<()> {
+        info!("Running {}", self.command);
         let mut child = self.launch()?;
 
         // forward output

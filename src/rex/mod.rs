@@ -25,15 +25,19 @@ pub type TaskId = String;
 pub struct Task {
     pub id: TaskId,
     pub name: String,
-    pub command: String
+    pub command: String,
+    pub height: u16,
+    pub width: u16
 }
 
 impl Task {
-    pub fn new(id: &str, name: &str, command: &str) -> Task {
+    pub fn new(id: &str, name: &str, command: &str, height: u16, width: u16) -> Task {
         Task {
             id: id.into(),
             name: name.into(),
-            command: command.into()
+            command: command.into(),
+            height,
+            width
         }
     }
 

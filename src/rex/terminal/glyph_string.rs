@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use regex::{Regex};
-use std::cmp::{max};
+use std::cmp::{max, min};
 use crate::rex::terminal::pane::PrintStyle;
 use std::io::Write;
 use log::info;
@@ -59,7 +59,23 @@ impl GlyphString {
         }
     }
 
-    pub fn write(&self, x_offset: u16, y_offset: u16, cur_style: PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
+    pub fn clear_to(&mut self, idx: usize) {
+        for i in 0..idx {
+            self.set(i, Glyph::default());
+        }
+    }
+
+    pub fn clear_after(&mut self, idx: usize) {
+        for i in idx..self.len() {
+            self.set(i, Glyph::default());
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.glyphs.clear();
+    }
+
+    pub fn write(&self, x_offset: u16, y_offset: u16, width: u16, cur_style: PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
         // TODO: Determine if we're dirty before deciding whether to print ourselves!
 
         // goto the offset for our line
@@ -67,7 +83,9 @@ impl GlyphString {
         output.push_str(&format!("\x1b[{};{}H", y_offset, x_offset));
 
         let mut cur_style = cur_style.clone(); // No mutating args!
-        for g in &self.glyphs {
+        let visible_width = min(self.len(), width as usize);
+
+        for g in &self.glyphs[0..visible_width] {
             // Make sure to keep the correct style for each glyph
             let diff = cur_style.diff_str(&g.state);
 
@@ -78,8 +96,15 @@ impl GlyphString {
 
             output.push(g.c);
         }
+        let mut pad_width = width as usize;
+        if self.len() < pad_width {
+            // Have to pad the final output string length, 'cause the writer doesn't handle
+            // VT100 sequences.
+            pad_width = output.len() + (pad_width - self.len());
+            info!("Padding {} glyphs out to {} characters @ {}", self.len(), width, pad_width);
+        }
 
-        write!(target, "{}", output);
+        write!(target, "{0: <1$}", output, pad_width);
 
         Ok(())
     }
@@ -97,11 +122,12 @@ impl GlyphString {
     }
 
     pub fn to_str(&self, current_state: &PrintStyle) -> String {
-        let mut current_state = current_state;
+        let mut current_state = *current_state;
         let mut s = String::new();
         for g in &self.glyphs {
-            if g.state != *current_state {
+            if g.state != current_state {
                 s += &g.state.to_str();
+                current_state = g.state.clone();
             }
             s.push(g.c);
         }
@@ -122,9 +148,22 @@ mod tests {
         g.push("a line of text", &ps);
 
         let mut output = Vec::new();
-        g.write(1, 3, ps, &mut output);
+        g.write(1, 3, 14, ps, &mut output);
 
         assert_eq!(output, b"\x1b[3;1Ha line of text");
+    }
+
+    #[test]
+    fn it_right_pads_with_spaces() {
+        let mut g = GlyphString::new();
+        let ps = PrintStyle::default();
+
+        g.push("a line of text", &ps);
+
+        let mut output = Vec::new();
+        g.write(1, 3, 15, ps, &mut output);
+
+        assert_eq!(output, b"\x1b[3;1Ha line of text ");
     }
 
     #[test]
@@ -140,8 +179,44 @@ mod tests {
         g.push(" of text", &ps);
 
         let mut output = Vec::new();
-        g.write(1, 3, ps, &mut output);
+        g.write(1, 3, 14, ps, &mut output);
 
         assert_eq!(std::str::from_utf8(&output).unwrap(), "\x1b[3;1H\x1b[32ma line\x1b[37m of text");
+    }
+
+    #[test]
+    fn it_clears_leading_chars() {
+        let mut g = GlyphString::new();
+        let ps = PrintStyle::default();
+
+        g.push("a line of text", &ps);
+
+        g.clear_to(6);
+
+        assert_eq!(g.to_str(&ps), "       of text")
+    }
+
+    #[test]
+    fn it_clears_following_chars() {
+        let mut g = GlyphString::new();
+        let ps = PrintStyle::default();
+
+        g.push("a line of text", &ps);
+
+        g.clear_after(6);
+
+        assert_eq!(g.to_str(&ps), "a line        ");
+    }
+
+    #[test]
+    fn it_clears_all_chars() {
+        let mut g = GlyphString::new();
+        let ps = PrintStyle::default();
+
+        g.push("a line of text", &ps);
+
+        g.clear();
+
+        assert_eq!(g.to_str(&ps), "");
     }
 }

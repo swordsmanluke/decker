@@ -1,9 +1,7 @@
 use crate::rex::TaskId;
-use regex::Regex;
-use crate::rex::terminal::{PaneManager, TerminalLocation, TerminalSize};
+use crate::rex::terminal::PaneManager;
 use std::io::Write;
 use log::info;
-use crate::rex::terminal::internal::StreamState;
 use crate::rex::terminal::pane::Pane;
 
 impl PaneManager {
@@ -28,24 +26,6 @@ impl PaneManager {
         match self.panes.get_mut(&task_id) {
             None => {  info!("Received output for unregistered task {}", &task_id); } // Drop data for unknown tasks
             Some(pane) => { pane.push(data).unwrap(); }
-        }
-    }
-}
-
-impl TerminalLocation {
-    pub fn new(top: u16, left: u16) -> TerminalLocation {
-        TerminalLocation {
-            top,
-            left
-        }
-    }
-}
-
-impl TerminalSize {
-    pub fn new(height: u16, width: u16) -> TerminalSize {
-        TerminalSize {
-            height,
-            width
         }
     }
 }

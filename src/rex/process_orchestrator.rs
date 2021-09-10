@@ -125,7 +125,7 @@ impl ProcessOrchestrator {
                 let (status_tx, status_rx) = channel();
                 let mut new_kid = ChildProcess::new(task.command.as_str(),
                                                     out_tx, status_tx.clone(),
-                                                    (24, 80));
+                                                    (task.height, task.width));
 
                 // TODO: What if this task already has named channels? Should I only create once
                 //       and reuse? Or replace them every time?
@@ -151,16 +151,19 @@ impl ProcessOrchestrator {
     }
 
     /***
-    Handle a requested
+    Handle a requested execution
      */
     fn handle_command(&mut self, command: &str, data: &str) -> anyhow::Result<()> {
-        info!("Commanded to execute {}: {}", command, data);
+        info!("Commanded to {}: {}", command, data);
 
         match match command {
             "execute" => { self.execute(data) }
             "activate" => { self.activate_proc(data) }
             "register" => { self.register_task(data) }
-            _ => { Ok(()) }
+            _ => {
+                info!("Unsupported command: {}", command);
+                Ok(())
+            }
         } {
             Err(e) => { self.resp_tx.send(format!("{}: Error - {}", command, e))? }
             Ok(()) => { self.resp_tx.send(format!("{}: Success", command))? }

@@ -28,7 +28,6 @@ impl TerminalOutput {
 pub(crate) struct StreamState {
     buffer: String,
     vetted_output: Vec<TerminalOutput>,
-    building_esc_seq: bool,
     build_state: VT100State
 }
 
@@ -37,7 +36,6 @@ impl StreamState {
         StreamState {
             buffer: String::new(),
             vetted_output: Vec::new(),
-            building_esc_seq: false,
             build_state: PlainText
         }
     }
@@ -51,13 +49,13 @@ impl StreamState {
                         self.buffer.push(c);
                         self.build_state = FoundEsc
                     } else {
-                        let mut last_output = self.vetted_output.pop().unwrap_or(Plaintext(String::new()));
+                        let last_output = self.vetted_output.pop().unwrap_or(Plaintext(String::new()));
                         match last_output {
                             Plaintext(mut plaintext_str) => {
                                 plaintext_str.push(c);
                                 self.vetted_output.push(Plaintext(plaintext_str));
                             }
-                            CSI(mut csi_str) => {
+                            CSI(csi_str) => {
                                 // Whoops - we can't append directly to this one!
                                 // Put it back and start a new string
                                 self.vetted_output.push(CSI(csi_str));
