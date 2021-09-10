@@ -65,6 +65,17 @@ impl GlyphString {
         }
     }
 
+    pub fn delete_to(&mut self, idx: usize) {
+        let start = min(self.len(), idx);
+        self.glyphs = self.glyphs[start..self.len()].to_owned();
+    }
+
+    pub fn delete_at(&mut self, idx: usize) {
+        if idx < self.len() {
+            self.glyphs.remove(idx);
+        }
+    }
+
     pub fn clear_after(&mut self, idx: usize) {
         for i in idx..self.len() {
             self.set(i, Glyph::default());
@@ -101,7 +112,6 @@ impl GlyphString {
             // Have to pad the final output string length, 'cause the writer doesn't handle
             // VT100 sequences.
             pad_width = output.len() + (pad_width - self.len());
-            info!("Padding {} glyphs out to {} characters @ {}", self.len(), width, pad_width);
         }
 
         write!(target, "{0: <1$}", output, pad_width);
@@ -194,6 +204,18 @@ mod tests {
         g.clear_to(6);
 
         assert_eq!(g.to_str(&ps), "       of text")
+    }
+
+    #[test]
+    fn it_deletes_leading_chars() {
+        let mut g = GlyphString::new();
+        let ps = PrintStyle::default();
+
+        g.push("a line of text", &ps);
+
+        g.delete_to(6);
+
+        assert_eq!(g.to_str(&ps), " of text")
     }
 
     #[test]

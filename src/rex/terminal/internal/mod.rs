@@ -4,16 +4,16 @@ use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
 
 enum VT100State {
     PlainText,
-    FoundEsc
+    FoundEsc,
 }
 
 /***
 Output is either plaintext or a VT100 command sequence instruction
  */
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TerminalOutput {
     Plaintext(String),
-    CSI(String)
+    CSI(String),
 }
 
 impl TerminalOutput {
@@ -28,7 +28,7 @@ impl TerminalOutput {
 pub(crate) struct StreamState {
     buffer: String,
     vetted_output: Vec<TerminalOutput>,
-    build_state: VT100State
+    build_state: VT100State,
 }
 
 impl StreamState {
@@ -36,7 +36,7 @@ impl StreamState {
         StreamState {
             buffer: String::new(),
             vetted_output: Vec::new(),
-            build_state: PlainText
+            build_state: PlainText,
         }
     }
 
@@ -69,7 +69,7 @@ impl StreamState {
                     self.buffer.push(c);
                     let not_an_esc_seq = self.buffer.len() == 2 && !self.is_esc_seq();
 
-                    if not_an_esc_seq ||  self.is_esc_seq_complete() {
+                    if not_an_esc_seq || self.is_esc_seq_complete() {
                         self.consume_buffer();
                         self.build_state = PlainText;
                     }
@@ -96,7 +96,7 @@ impl StreamState {
 
     fn is_esc_seq_complete(&self) -> bool {
         // TODO: Make this regex static or a constant or something
-        let vt100_regex = Regex::new(r"((\x1b\[|\x9b)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e])+").unwrap();
+        let vt100_regex = Regex::new(r"((\x1b\[|\x9b)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e>=])+").unwrap();
         self.is_esc_seq() && vt100_regex.is_match(&self.buffer)
     }
 
@@ -112,8 +112,16 @@ impl StreamState {
     }
 
     pub fn consume(&mut self) -> Vec<TerminalOutput> {
-        if self.buffer.ends_with('\x1b') { self.consume_buffer(); self.build_state = PlainText; }
-        let out = self.vetted_output.clone();
+        if self.buffer.ends_with('\x1b') {
+            self.consume_buffer();
+            self.build_state = PlainText;
+        }
+        // reject any empty strings.
+        let out = self.vetted_output.iter().filter_map(|o| match o {
+            Plaintext(p) => { if p.is_empty() { None } else { Some(o.to_owned()) } }
+            CSI(csi) => { if csi.is_empty() { None } else { Some(o.to_owned()) } }
+        }).collect();
+
         self.vetted_output = Vec::new();
 
         out
@@ -214,5 +222,15 @@ mod tests {
         s.push("\x1b");
         let out = s.consume();
         assert_eq!(as_raw_string(&out), String::from("some chars\x1b"))
+    }
+
+    #[test]
+    fn it_recognizes_unusual_csis() {
+        let mut s = given_a_stream_with_chars("\x1b[>\x1b[=");
+        let out = s.consume();
+        assert!(out.iter().all(|s| match s {
+            CSI(_) => { true }
+            _ => { false }
+        }), format!("not all of {:?} are CSIs!", &out));
     }
 }

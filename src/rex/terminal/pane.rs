@@ -308,6 +308,13 @@ impl Pane {
 
                     for c in plain.chars() {
                         match c {
+                            '\u{7}' => { /* Backspace */
+                                let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
+                                if self.cursor.x > 1 {
+                                    self.cursor.decr_x(1);
+                                    line.delete_at(self.cursor.x as usize);
+                                }
+                            }
                             '\n' => {
                                 // Special char \n creates a new line.
                                 // Advance the cursor and reset to the start position.
@@ -328,6 +335,7 @@ impl Pane {
                             }
 
                             _ => {
+                                info!("Pressed key: {:?}", c);
                                 let vert_line = self.cursor.y - 1;
                                 let line = self.lines.get_mut(vert_line as usize).unwrap();
                                 line.set((self.cursor.x - 1) as usize, Glyph::new(c, self.print_state));
@@ -350,11 +358,55 @@ impl Pane {
                             /* cursor movement */
                             self.move_cursor(&vt100_code)?
                         }
-                        'K' | 'J' => {
+                        'J' | 'K' | 'L' => {
                             /* text deletion */
                             self.delete_text(&vt100_code)?
                         }
-                        _ => { /* Just print these... I guess */ }
+                        'h' | 'l' => {
+                            /* Loads of control options */
+                            match vt100_code.as_str() {
+                                // Bracketed paste is safe to just send direct to STDOUT. We
+                                // won't be running more than one active program at a time, so
+                                // it shouldn't matter.
+                                "\x1b[?2004h" |  /* Bracketed paste mode ON */
+                                "\x1b[?2004l" |  /* Bracketed paste mode OFF */
+                                "\x1b[?25l"   |  /* hide cursor */
+                                "\x1b[?34h"      /* underline cursor */
+                                => {
+                                    // All of these can be managed by the
+                                    // top level terminal emulator...
+                                    print!("{}", vt100_code);
+                                }
+                                // Alternate screen
+                                "\x1b[?1049h" => {
+                                    /* Alternate screen ON */
+                                    self.delete_text("\x1b[2J").unwrap(); // clear screen
+                                }
+                                "\x1b[?1049l" => {
+                                    /* Alternate screen OFF */
+                                    self.delete_text("\x1b[2J").unwrap(); // clear screen
+                                }
+                                _ => {}
+                            }
+                        }
+                        'r' => { /* Set top and bottom lines of window. Ignored*/ }
+                        'n' => { /* Terminal queries */
+                            match vt100_code.as_str() {
+                                "\x1b[6n" => {
+                                    // Query the (virtual) cursor pos
+                                    let response = format!("\x1b[{};{}R", self.cursor.y, self.cursor.x);
+                                    // TODO: Send this as input
+                                }
+                                _ => {
+                                    info!("Unhandled query!");
+                                }
+                            }
+                        }
+                        _ => {
+                            /* Just print these directly... I guess */
+                            info!("Unknown CSI {:?}", vt100_code);
+                            print!("{}", vt100_code);
+                        }
                     }
                 }
             }
@@ -390,6 +442,11 @@ impl Pane {
     fn delete_text(&mut self, vt100_code: &str) -> anyhow::Result<()> {
         let last_char = vt100_code.chars().last().unwrap();
         match last_char {
+            'L' => {
+                /* Erase all characters before me, but don't truncate */
+                let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                line.clear_to(self.cursor.x as usize);
+            }
             'K' => {
                 match Pane::deletion_type(vt100_code) {
                     None => { /*Delete to end of line*/
@@ -398,7 +455,7 @@ impl Pane {
                     }
                     Some(1) => { /* Delete to start of line */
                         let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
-                        line.clear_to(self.cursor.x as usize);
+                        line.delete_to(self.cursor.x as usize);
                     }
                     Some(2) => { /* Delete entire line*/
                         let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
