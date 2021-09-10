@@ -1,7 +1,7 @@
 use crate::rex::TaskId;
 use crate::rex::terminal::PaneManager;
 use std::io::Write;
-use log::info;
+use log::{info, error};
 use crate::rex::terminal::pane::Pane;
 
 impl PaneManager {
@@ -25,7 +25,11 @@ impl PaneManager {
     pub fn push(&mut self, task_id: TaskId, data: &String) {
         match self.panes.get_mut(&task_id) {
             None => {  info!("Received output for unregistered task {}", &task_id); } // Drop data for unknown tasks
-            Some(pane) => { pane.push(data).unwrap(); }
+            Some(pane) => {
+                match pane.push(data) {
+                    Ok(_) => {}
+                    Err(e) => { error!("Error: {}", e.to_string()) }
+                } }
         }
     }
 }

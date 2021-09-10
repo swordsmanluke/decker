@@ -51,7 +51,7 @@ fn run() -> anyhow::Result<()> {
         // read stdin and forward it to the active proc.
         stdin.read_to_string(&mut input)?;
         if !input.is_empty() {
-            info!("Sending input: {}", input);
+            info!("Sending input: {:?}", input);
             input_tx.send(input.clone())?;
             input.clear();
         }

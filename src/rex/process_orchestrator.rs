@@ -56,7 +56,7 @@ impl ProcessOrchestrator {
     fn forward_input(&mut self) -> anyhow::Result<()>{
         match &self.input_rx.try_recv() {
             Ok(input) => {
-                info!("Received input: {}", input);
+                info!("Received input: {:?}", input);
                 match &self.active_proc {
                     Some(proc_name) => {
                         // Forward these bytes to the active process

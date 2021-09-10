@@ -230,14 +230,22 @@ impl PrintStyle {
     }
 
     pub fn apply_vt100(&mut self, s: &str) -> anyhow::Result<()> {
-        let parm_rx = Regex::new("\x1b\\[([0-9;]+)%?m").unwrap();
+        info!("Attempting to apply SGR command '{:?}'", s);
+
+        let parm_rx = Regex::new("\x1b\\[([0-9;]*)%?m").unwrap();
         match parm_rx.captures(s) {
-            None => { bail!("'{}' does not look like an SGR sequence!", s) }
+            None => { bail!("'{:?}' does not look like an SGR sequence!", s) }
             Some(captures) => {
                 let int_parts: Vec<u8> = captures.get(1).unwrap().as_str().
                     split(";").
-                    map(|a| a.to_string().parse::<u8>().unwrap()).
+                    map(|a| a.to_string().parse::<u8>()).
+                    filter_map(|p| p.ok()).
                     collect();
+
+                if int_parts.is_empty() {
+                    // It's fine. Just return
+                    return Ok(());
+                }
 
                 let sgr_code = int_parts.first().unwrap();
                 match sgr_code {
@@ -308,11 +316,12 @@ impl Pane {
 
                     for c in plain.chars() {
                         match c {
-                            '\u{7}' => { /* Backspace */
+                            '\u{7}' => { /* Bell */ print!("\u{7}")}
+                            '\u{8}' => { /* Backspace */
                                 let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                                 if self.cursor.x > 1 {
                                     self.cursor.decr_x(1);
-                                    line.delete_at(self.cursor.x as usize);
+                                    line.delete_at((self.cursor.x - 1) as usize);
                                 }
                             }
                             '\n' => {
@@ -335,7 +344,6 @@ impl Pane {
                             }
 
                             _ => {
-                                info!("Pressed key: {:?}", c);
                                 let vert_line = self.cursor.y - 1;
                                 let line = self.lines.get_mut(vert_line as usize).unwrap();
                                 line.set((self.cursor.x - 1) as usize, Glyph::new(c, self.print_state));
@@ -371,13 +379,14 @@ impl Pane {
                                 "\x1b[?2004h" |  /* Bracketed paste mode ON */
                                 "\x1b[?2004l" |  /* Bracketed paste mode OFF */
                                 "\x1b[?25l"   |  /* hide cursor */
+                                "\x1b[?25h"   |  /* show cursor */
                                 "\x1b[?34h"      /* underline cursor */
                                 => {
                                     // All of these can be managed by the
                                     // top level terminal emulator...
-                                    if vt100_code != "\x1b[?25l" {  /* hide cursor */
+                                    // if vt100_code != "\x1b[?25l" {  /* hide cursor */
                                         print!("{}", vt100_code);
-                                    }
+                                    // }
                                 }
                                 // Alternate screen
                                 "\x1b[?1049h" => {
