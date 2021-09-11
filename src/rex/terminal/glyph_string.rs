@@ -15,11 +15,12 @@ pub struct GlyphString {
 pub struct Glyph {
     c: char,
     state: PrintStyle,
+    dirty: bool
 }
 
 impl Glyph {
     pub fn new(c: char, state: PrintStyle) -> Self {
-        Glyph { c, state }
+        Glyph { c, state, dirty: true }
     }
 }
 
@@ -28,6 +29,7 @@ impl Default for Glyph {
         Glyph {
             c: ' ',
             state: PrintStyle::default(),
+            dirty: true
         }
     }
 }
@@ -46,6 +48,17 @@ impl GlyphString {
     pub fn new() -> GlyphString {
         GlyphString {
             glyphs: Vec::new()
+        }
+    }
+
+    pub fn dirty(&self) -> bool {
+        self.glyphs.iter().any(|g| g.dirty)
+    }
+
+    pub fn make_dirty(&mut self) {
+        match self.glyphs.get_mut(0){
+            None => {}
+            Some(g) => { g.dirty = true; }
         }
     }
 
@@ -98,7 +111,7 @@ impl GlyphString {
         self.glyphs.clear();
     }
 
-    pub fn write(&self, x_offset: u16, y_offset: u16, width: u16, cur_style: PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
+    pub fn write(&mut self, x_offset: u16, y_offset: u16, width: u16, cur_style: PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
         // TODO: Determine if we're dirty before deciding whether to print ourselves!
 
         // goto the offset for our line
@@ -108,7 +121,9 @@ impl GlyphString {
         let mut cur_style = cur_style.clone(); // No mutating args!
         let visible_width = min(self.len(), width as usize);
 
-        for g in &self.glyphs[0..visible_width] {
+        self.glyphs.iter_mut().take(visible_width).for_each(|g| {
+            g.dirty = false; // We've printed you now!
+
             // Make sure to keep the correct style for each glyph
             let diff = cur_style.diff_str(&g.state);
 
@@ -118,7 +133,7 @@ impl GlyphString {
             }
 
             output.push(g.c);
-        }
+        });
         let mut pad_width = width as usize;
         if self.len() < pad_width {
             // Have to pad the final output string length, 'cause the writer doesn't handle

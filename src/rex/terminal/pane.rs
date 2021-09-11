@@ -366,6 +366,7 @@ impl Pane {
                                     info!("Popped '{:?}'", self.lines.remove(0));
                                     self.cursor.set_y(self.height);
                                     self.lines.push(GlyphString::new());
+                                    self.lines.iter_mut().for_each(|l| l.make_dirty());
                                 }
                             }
                             '\r' => {
@@ -455,12 +456,19 @@ impl Pane {
         Ok(())
     }
 
-    pub fn write(&self, target: &mut dyn Write) -> anyhow::Result<()> {
+    pub fn write(&mut self, target: &mut dyn Write) -> anyhow::Result<()> {
         let mut line_idx = 0;
 
-        self.lines.iter().for_each(|line| {
-            let ps = self.print_state.clone();
-            line.write(self.x, self.y + line_idx, self.width,ps, target).unwrap();
+        let ps = self.print_state.clone();
+        // Values cloned to avoid having immutable references inside a mutable reference to self
+        let x_off = self.x;
+        let y_off = self.y;
+        let width = self.width;
+
+        self.lines.iter_mut().for_each(|mut line| {
+            if line.dirty() {
+                line.write(x_off, y_off + line_idx, width, ps, target).unwrap();
+            }
             line_idx +=1;
         });
 
