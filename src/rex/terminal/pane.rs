@@ -277,8 +277,10 @@ impl PrintStyle {
                     27 => { self.invert = false; }
                     30..=37 => { self.foreground = Color::eight_color(*sgr_code); }
                     38 => { self.foreground = Color::extended_color(&int_parts[1..])? }
+                    39 => { self.foreground = Color::White }
                     40..=47 => { self.background = Color::eight_color(*sgr_code); }
                     48 => { self.background = Color::extended_color(&int_parts[1..])? }
+                    49 => { self.foreground = Color::Black }
                     90..=97 => {
                         self.foreground = Color::eight_color(*sgr_code);
                         self.bold = true;
@@ -330,7 +332,7 @@ impl Pane {
                                 let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                                 if self.cursor.x > 1 {
                                     self.cursor.decr_x(1);
-                                    line.delete_at((self.cursor.x - 1) as usize);
+                                    line.clear_at((self.cursor.x - 1) as usize);
                                 }
                             }
                             '\n' => {
@@ -343,6 +345,8 @@ impl Pane {
                                 // discard the topmost line of output and add a new
                                 // line to the end.
                                 if self.cursor.y >= self.height {
+                                    info!("Scrolling past bottom of screen. Pop the topmost line off the stack");
+                                    info!("Popped '{:?}'", self.lines.remove(0));
                                     self.cursor.set_y(self.height);
                                     self.lines.push(GlyphString::new());
                                 }
@@ -351,7 +355,6 @@ impl Pane {
                                 // Return to the start of this line!
                                 self.cursor.set_x(1);
                             }
-
                             _ => {
                                 let vert_line = self.cursor.y - 1;
                                 let line = self.lines.get_mut(vert_line as usize).unwrap();
@@ -444,10 +447,15 @@ impl Pane {
             line_idx +=1;
         });
 
-        // put cursor where it belongs
-        info!("After printing, cursor is at {}x{}y", self.cursor.x, self.cursor.y);
-        write!(target, "\x1b[{};{}H", self.cursor.y + self.y - 1, self.cursor.x + self.x - 1)?;
+        Ok(())
+    }
 
+    pub fn take_cursor(&self, target: &mut dyn Write) -> anyhow::Result<()> {
+        // put cursor where it belongs
+        let global_y = self.cursor.y + self.y - 1;
+        let global_x = self.cursor.x + self.x - 1;
+        info!("Putting cursor at {}x{}y (global: {},{})", self.cursor.x, self.cursor.y, global_x, global_y);
+        write!(target, "\x1b[{};{}H", global_y, global_x)?;
         Ok(())
     }
 
@@ -464,21 +472,22 @@ impl Pane {
         match last_char {
             'L' => {
                 /* Erase all characters before me, but don't truncate */
-                let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                 line.clear_to(self.cursor.x as usize);
             }
             'K' => {
                 match Pane::deletion_type(vt100_code) {
                     None => { /*Delete to end of line*/
-                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        info!("Clearing {}:{} -> {}", self.cursor.y - 1, self.cursor.x, self.width);
+                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear_after(self.cursor.x as usize);
                     }
                     Some(1) => { /* Delete to start of line */
-                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.delete_to(self.cursor.x as usize);
                     }
                     Some(2) => { /* Delete entire line*/
-                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear();
                     }
                     Some(i) => { /*Invalid*/
@@ -490,18 +499,18 @@ impl Pane {
                 match Pane::deletion_type(vt100_code) {
                     None => { /*Delete to end of screen*/
                         // Clear the current line
-                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear_after(self.cursor.x as usize);
 
                         //... and then the remainder of the screen
-                        for line_idx in (self.cursor.y + 1)..self.height {
+                        for line_idx in self.cursor.y..self.height {
                             let line = self.lines.get_mut(line_idx as usize).unwrap();
                             line.clear();
                         }
                     }
                     Some(1) => { /* Delete to start of screen */
                         // Clear the current line
-                        let line = self.lines.get_mut(self.cursor.y as usize).unwrap();
+                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear_to(self.cursor.x as usize);
 
                         //... and then the top of the screen on down

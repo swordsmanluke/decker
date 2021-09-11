@@ -4,7 +4,9 @@ use std::cmp::{max, min};
 use crate::rex::terminal::pane::PrintStyle;
 use std::io::Write;
 use log::info;
+use std::fmt::{Debug, Formatter};
 
+#[derive(Clone)]
 pub struct GlyphString {
     glyphs: Vec<Glyph>,
 }
@@ -32,6 +34,12 @@ impl Default for Glyph {
 
 lazy_static! {
     static ref VT100_REGEX: Regex = Regex::new(r"((\u001b\[|\u009b)[\u0030-\u003f]*[\u0020-\u002f]*[\u0040-\u007e])+").unwrap();
+}
+
+impl Debug for GlyphString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.plaintext().as_str())
+    }
 }
 
 impl GlyphString {
@@ -63,6 +71,10 @@ impl GlyphString {
         for i in 0..idx {
             self.set(i, Glyph::default());
         }
+    }
+
+    pub(crate) fn clear_at(&mut self, idx: usize) {
+        self.glyphs.get_mut(idx).unwrap().c = ' '
     }
 
     pub fn delete_to(&mut self, idx: usize) {

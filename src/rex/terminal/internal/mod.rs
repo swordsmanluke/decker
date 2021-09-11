@@ -91,12 +91,13 @@ impl StreamState {
     }
 
     pub fn is_esc_seq(&self) -> bool {
-        self.buffer.starts_with("\x1B[")
+        let csi_beginning = Regex::new(r"(\x1b\[|\x9b|>|=)").unwrap();
+        csi_beginning.is_match(&self.buffer)
     }
 
     fn is_esc_seq_complete(&self) -> bool {
         // TODO: Make this regex static or a constant or something
-        let vt100_regex = Regex::new(r"((\x1b\[|\x9b)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e>=])+").unwrap();
+        let vt100_regex = Regex::new(r"((\x1b\[|\x9b|>|=)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e>=])+").unwrap();
         self.is_esc_seq() && vt100_regex.is_match(&self.buffer)
     }
 
@@ -226,7 +227,7 @@ mod tests {
 
     #[test]
     fn it_recognizes_unusual_csis() {
-        let mut s = given_a_stream_with_chars("\x1b[>\x1b[=");
+        let mut s = given_a_stream_with_chars("\x1b[>\x1b[=\x1b=\x1b>\x1b\\");
         let out = s.consume();
         assert!(out.iter().all(|s| match s {
             CSI(_) => { true }

@@ -27,6 +27,9 @@ impl PaneManager {
             info!("Writing output for {}", task_id);
             pane.write(target).unwrap();
         }
+        // send the cursor to the main pane's location
+        let main_pane = self.find_by_id("main").unwrap();
+        main_pane.take_cursor(target);
     }
 
     pub fn push(&mut self, task_id: TaskId, data: &String) {
