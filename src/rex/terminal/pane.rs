@@ -121,11 +121,11 @@ impl Color {
     }
 
 
-    pub fn extended_color(args: &[u8]) -> anyhow::Result<Color> {
-        match args.first().unwrap() {
-            2 => { Ok(Color::RGB(args[1], args[2], args[3])) }
-            5 => { Ok(Color::TWOFIFTYSIX(args[1])) }
-            _ => { bail!("{} is not a valid SGR extended color argument!", args.first().unwrap()) }
+    pub fn extended_color(args: &mut Vec<u8>) -> anyhow::Result<Color> {
+        match args.remove(0) {
+            2 => { Ok(Color::RGB(args.remove(0), args.remove(0), args.remove(0))) }
+            5 => { Ok(Color::TWOFIFTYSIX(args.remove(0))) }
+            c => { bail!("{} is not a valid SGR extended color argument!", c) }
         }
     }
 }
@@ -236,6 +236,18 @@ impl PrintStyle {
         fg_str
     }
 
+    pub fn reset(&mut self) -> anyhow::Result<()>{
+        // Keep this in sync with Self::default()
+        self.foreground = Color::White;
+        self.background = Color::Black;
+        self.italicized = false;
+        self.underline = false;
+        self.invert = false;
+        self.blink = false;
+        self.bold = false;
+        Ok(())
+    }
+
     pub fn apply_vt100(&mut self, s: &str) -> anyhow::Result<()> {
         info!("Attempting to apply SGR command '{:?}'", s);
 
@@ -243,60 +255,65 @@ impl PrintStyle {
         match parm_rx.captures(s) {
             None => { bail!("'{:?}' does not look like an SGR sequence!", s) }
             Some(captures) => {
-                let int_parts: Vec<u8> = captures.get(1).unwrap().as_str().
+                let mut int_parts: Vec<u8> = captures.get(1).unwrap().as_str().
                     split(";").
                     map(|a| a.to_string().parse::<u8>()).
                     filter_map(|p| p.ok()).
                     collect();
 
                 if int_parts.is_empty() {
-                    // It's fine. Just return
-                    return Ok(());
+                    // Special case - this is shorthand for reset
+                    self.reset()?;
                 }
 
-                let sgr_code = int_parts.first().unwrap();
-                match sgr_code {
-                    0 => {
-                        /* reset */
-                        self.foreground = Color::White;
-                        self.background = Color::Black;
-                        self.blink = false;
-                        self.underline = false;
-                        self.bold = false;
-                    }
-                    1 => { self.bold = true; }
-                    2 => { self.bold = false; }
-                    3 => { self.italicized = true;}
-                    4 => { self.underline = true; }
-                    5 => { self.blink = true; }
-                    7 => { self.invert = true; }
-                    22 => { self.bold = false; }
-                    23 => { self.italicized = false; }
-                    24 => { self.underline = false; }
-                    25 => { self.blink = false; }
-                    27 => { self.invert = false; }
-                    30..=37 => { self.foreground = Color::eight_color(*sgr_code); }
-                    38 => { self.foreground = Color::extended_color(&int_parts[1..])? }
-                    39 => { self.foreground = Color::White }
-                    40..=47 => { self.background = Color::eight_color(*sgr_code); }
-                    48 => { self.background = Color::extended_color(&int_parts[1..])? }
-                    49 => { self.foreground = Color::Black }
-                    90..=97 => {
-                        self.foreground = Color::eight_color(*sgr_code);
-                        self.bold = true;
-                    }
-                    100..=107 => {
-                        self.background = Color::eight_color(*sgr_code);
-                        self.bold = true;
+                // until int_parts is empty, consume and apply the settings
+                while !int_parts.is_empty() {
+                    let sgr_code = int_parts.remove(0);
+
+                    match sgr_code {
+                        0 => {
+                            /* reset */
+                            self.foreground = Color::White;
+                            self.background = Color::Black;
+                            self.blink = false;
+                            self.underline = false;
+                            self.bold = false;
+                        }
+                        1 => { self.bold = true; }
+                        2 => { self.bold = false; }
+                        3 => { self.italicized = true; }
+                        4 => { self.underline = true; }
+                        5 => { self.blink = true; }
+                        7 => { self.invert = true; }
+                        22 => { self.bold = false; }
+                        23 => { self.italicized = false; }
+                        24 => { self.underline = false; }
+                        25 => { self.blink = false; }
+                        27 => { self.invert = false; }
+                        30..=37 => { self.foreground = Color::eight_color(sgr_code); }
+                        38 => { self.foreground = Color::extended_color(&mut int_parts)? }
+                        39 => { self.foreground = Color::White }
+                        40..=47 => { self.background = Color::eight_color(sgr_code); }
+                        48 => { self.background = Color::extended_color(&mut int_parts)? }
+                        49 => { self.foreground = Color::Black }
+                        90..=97 => {
+                            self.foreground = Color::eight_color(sgr_code);
+                            self.bold = true;
+                        }
+                        100..=107 => {
+                            self.background = Color::eight_color(sgr_code);
+                            self.bold = true;
+                        }
+
+                        _ => { panic!("Invalid or unknown SGR code {}", sgr_code) }
                     }
 
-                    _ => { panic!("Invalid or unknown SGR code {}", sgr_code) }
+                    parm_rx.captures(s).unwrap();
                 }
-
-                parm_rx.captures(s).unwrap();
-                Ok(())
             }
         }
+
+        Ok(())
     }
 }
 
@@ -783,6 +800,16 @@ mod tests {
         ps.apply_vt100(bg_code).unwrap();
 
         assert_eq!(ps.to_str(), fg_code.to_owned() + bg_code);
+    }
+
+    #[test]
+    fn it_applies_multiple_codes_at_once() {
+        let code = "\x1b[;1;33;42m";
+        let mut ps = PrintStyle::default();
+        ps.apply_vt100(code).unwrap();
+
+        assert_eq!(ps.foreground, Color::Yellow);
+        assert_eq!(ps.background, Color::Green);
     }
 
     #[test]
