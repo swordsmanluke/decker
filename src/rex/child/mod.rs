@@ -57,8 +57,9 @@ impl ChildProcess {
         let (stop_tx, stop_rx) = channel();
 
         let out_loop = std::thread::spawn( move || {
+            let mut output = [0u8; 1024];
+
             while let Err(TryRecvError::Empty) = stop_rx.try_recv() {
-                let mut output = [0u8; 1024];
                 let size = reader.read(&mut output).unwrap_or(0);
                 sender.send(String::from_utf8(output[..size].to_owned()).unwrap()).unwrap();
             };

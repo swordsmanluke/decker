@@ -4,6 +4,7 @@ use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError};
 use std::collections::HashMap;
 use std::thread;
 use log::info;
+use crate::rex::master_control::{RegisterTask, ResizeTask};
 
 impl ProcessOrchestrator {
     /***
@@ -17,6 +18,7 @@ impl ProcessOrchestrator {
 
         ProcessOrchestrator {
             tasks: HashMap::new(),
+            sizes: HashMap::new(),
             command_rx: cmd_rx,
             resp_tx: resp_tx,
             output_tx,
@@ -76,7 +78,8 @@ impl ProcessOrchestrator {
         self.proc_io_channels.iter().for_each({|(name, (_, rx))|
             match rx.try_recv() {
                 Ok(s) => {
-                    let proc_output = ProcOutput{name: name.clone(), output: s};
+                    let pane_id = if self.active_proc == Some(name.clone()) { "main".to_string() } else { name.clone() };
+                    let proc_output = ProcOutput{name: pane_id, output: s};
                     self.output_tx.send(proc_output).unwrap()  ; }
                 Err(TryRecvError::Empty) => {}
                 Err(_) => { /* TODO */ }
@@ -106,10 +109,10 @@ impl ProcessOrchestrator {
     /***
     Delete a task by name
      */
-    fn delete(&mut self, name: &String) -> anyhow::Result<()> {
-        self.tasks.remove(name);
-        self.proc_command_channels.remove(name);
-        self.proc_io_channels.remove(name);
+    fn delete(&mut self, task_id: &String) -> anyhow::Result<()> {
+        self.tasks.remove(task_id);
+        self.proc_command_channels.remove(task_id);
+        self.proc_io_channels.remove(task_id);
 
         Ok(())
     }
@@ -117,24 +120,39 @@ impl ProcessOrchestrator {
     /***
     Execute a task by name
      */
-    fn execute(&mut self, name: &str) -> anyhow::Result<()> {
-        match self.tasks.get(name) {
-            None => {}
+    fn execute(&mut self, task_id: &str) -> anyhow::Result<()> {
+        match self.tasks.get(task_id) {
+            None => {
+                info!("Could not find task {} to execute in {:?}", task_id, self.tasks.keys());
+            }
             Some(task) => {
-                let (out_tx, out_rx) = channel();
-                let (status_tx, status_rx) = channel();
-                let mut new_kid = ChildProcess::new(task.command.as_str(),
-                                                    out_tx, status_tx.clone(),
-                                                    (task.height, task.width));
+                let size = self.sizes.get(task_id);
+                if size.is_none() {
+                    info!("Cannot run {} - no terminal size was assigned! Does this have a pane?", task_id);
+                    return Ok(());
+                }
 
-                // TODO: What if this task already has named channels? Should I only create once
-                //       and reuse? Or replace them every time?
-                self.proc_io_channels.insert(name.to_string(), (new_kid.input_tx(), out_rx));
-                self.proc_command_channels.insert(name.to_string(), (status_tx, status_rx));
+                match size.unwrap() {
+                    None => {
+                        info!("Cannot run {} - no terminal size was assigned! Does this have a pane?", task_id);
+                    }
+                    Some((width, height)) => {
+                        let (out_tx, out_rx) = channel();
+                        let (status_tx, status_rx) = channel();
+                        let mut new_kid = ChildProcess::new(task.command.as_str(),
+                                                            out_tx, status_tx.clone(),
+                                                            (*height, *width));
 
-                thread::spawn( move || {
-                    new_kid.run().unwrap();
-                });
+                        // TODO: What if this task already has named channels? Should I only create once
+                        //       and reuse? Or replace them every time?
+                        self.proc_io_channels.insert(task_id.to_string(), (new_kid.input_tx(), out_rx));
+                        self.proc_command_channels.insert(task_id.to_string(), (status_tx, status_rx));
+
+                        thread::spawn( move || {
+                            new_kid.run().unwrap();
+                        });
+                    }
+                }
             }
         }
 
@@ -157,9 +175,10 @@ impl ProcessOrchestrator {
         info!("Commanded to {}: {}", command, data);
 
         match match command {
-            "execute" => { self.execute(data) }
+            "execute"  => { self.execute(data) }
             "activate" => { self.activate_proc(data) }
             "register" => { self.register_task(data) }
+            "resize"   => { self.resize_task(data) }
             _ => {
                 info!("Unsupported command: {}", command);
                 Ok(())
@@ -172,9 +191,17 @@ impl ProcessOrchestrator {
         Ok(())
     }
 
-    fn register_task(&mut self, task_str: &str) -> anyhow::Result<()>{
-        let task: Task = serde_json::from_str(task_str)?;
-        self.tasks.insert(task.name.clone(), task);
+    fn register_task(&mut self, register_str: &str) -> anyhow::Result<()>{
+        let register: RegisterTask = serde_json::from_str(register_str)?;
+        self.sizes.insert(register.task.id.clone(), register.size);
+        self.tasks.insert(register.task.id.clone(), register.task);
+
+        Ok(())
+    }
+
+    fn resize_task(&mut self, resize_str: &str) -> anyhow::Result<()>{
+        let resize: ResizeTask = serde_json::from_str(resize_str)?;
+        self.sizes.insert(resize.task_id.clone(), resize.size);
 
         Ok(())
     }

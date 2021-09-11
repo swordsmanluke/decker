@@ -7,6 +7,7 @@ use termion::raw::IntoRawMode;
 use crate::rex::{Task, MasterControl, TaskId};
 use crate::rex::terminal::pane::Pane;
 use crate::rex::terminal::PaneManager;
+use crate::rex::config::{load_task_config, PaneDefinition};
 
 mod rex;
 
@@ -23,26 +24,39 @@ fn read_output<T>(rx: &mut Receiver<T>) -> anyhow::Result<Option<T>> {
 
 fn run() -> anyhow::Result<()> {
     init_logging()?;
+    let hex_cfg = load_task_config().unwrap();
 
     let mut stdin = termion::async_stdin();
     let mut stdout = stdout().into_raw_mode()?;
 
     let (output_tx, mut output_rx) = channel();
     let mut mcp = MasterControl::new(output_tx);
+    let mut pane_manager = PaneManager::new();
 
     let input_tx = mcp.input_tx();
 
-    let task_id: TaskId = "bash".into();
-    let height: u16 = 24;
-    let width: u16 = 80;
-    let pane = Pane::new(&task_id, 5, 5, height, width);
+    // create panes from cfg
+    for p in hex_cfg.panes {
+        let newPane= Pane::new(&p.task_id, p.x, p.y, p.height, p.width);
+        pane_manager.register(p.task_id, newPane);
+    }
 
-    mcp.register(Task::new(&task_id, &task_id, "bash", height, width) )?;
-    mcp.execute(&task_id.to_string())?;
-    mcp.activate_proc(&task_id)?;
+    //  and register tasks from cfg
+    for task in hex_cfg.tasks {
+        let pane = pane_manager.find_by_id(&task.id);
+        match pane {
+            None => {
+                mcp.register(task, None)?;
+            }
+            Some(p) => {
+                mcp.register(Task::new(&task.id, &task.name, &task.command), Some((p.width, p.height)))?;
+            }
+        }
+    }
+    let task_id: TaskId = TaskId::from("zsh");
+    mcp.activate_proc(&task_id, pane_manager.find_by_id("main").unwrap())?;
+    mcp.execute(&task_id)?;
 
-    let mut pane_manager = PaneManager::new();
-    pane_manager.register(task_id, pane);
     let mut input = String::new();
 
     println!("\x1b[2J"); // clear screen before we begin

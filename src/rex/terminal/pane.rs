@@ -8,12 +8,12 @@ use log::{info, warn, error};
 use anyhow::bail;
 
 pub struct Pane {
-    id: String,
+    pub id: String,
     // Location and Dimensions
-    x: u16,
-    y: u16,
-    height: u16,
-    width: u16,
+    pub x: u16,
+    pub y: u16,
+    pub height: u16,
+    pub width: u16,
 
     // Cached lines
     lines: Vec<GlyphString>,
@@ -50,6 +50,7 @@ pub struct PrintStyle {
     pub underline: bool,
     pub blink: bool,
     pub bold: bool,
+    pub invert: bool
 }
 
 struct Cursor {
@@ -136,6 +137,7 @@ impl Default for PrintStyle {
             background: Color::Black,
             italicized: false,
             underline: false,
+            invert: false,
             blink: false,
             bold: false,
         }
@@ -170,6 +172,11 @@ impl PrintStyle {
         if self.italicized != other.italicized {
             if other.italicized { out += "\x1b[3m" }
             else { out += "\x1b[23m" }
+        }
+
+        if self.invert != other.invert {
+             if other.invert { out += "\x1b[7m" }
+            else { out += "\x1b[27m" }
         }
 
         out
@@ -262,10 +269,12 @@ impl PrintStyle {
                     3 => { self.italicized = true;}
                     4 => { self.underline = true; }
                     5 => { self.blink = true; }
+                    7 => { self.invert = true; }
                     22 => { self.bold = false; }
                     23 => { self.italicized = false; }
                     24 => { self.underline = false; }
                     25 => { self.blink = false; }
+                    27 => { self.invert = false; }
                     30..=37 => { self.foreground = Color::eight_color(*sgr_code); }
                     38 => { self.foreground = Color::extended_color(&int_parts[1..])? }
                     40..=47 => { self.background = Color::eight_color(*sgr_code); }

@@ -15,6 +15,13 @@ impl PaneManager {
         self.panes.insert(task_id, pane);
     }
 
+    pub fn find_by_id(&mut self, id: &str) -> Option<&Pane> {
+        match self.panes.iter().find(|(task_id, _) | **task_id == id) {
+            None => { None }
+            Some((_, pane)) => { Some(pane) }
+        }
+    }
+
     pub fn write(&mut self, target: &mut dyn Write) {
         for (task_id, pane) in self.panes.iter_mut() {
             info!("Writing output for {}", task_id);

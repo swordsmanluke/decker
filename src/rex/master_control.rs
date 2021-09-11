@@ -1,10 +1,26 @@
-use crate::rex::{MasterControl, ProcOutput, ProcessOrchestrator, Task};
+use crate::rex::{MasterControl, ProcOutput, ProcessOrchestrator, Task, TaskId};
 use std::sync::mpsc::{Sender, channel};
 use std::thread;
 use log::{info, warn};
 use std::time::Duration;
 use std::ops::Deref;
 use simple_error::bail;
+use serde::{Serialize, Deserialize};
+use crate::rex::terminal::pane::Pane;
+
+pub type PaneSize = Option<(u16, u16)>;
+
+#[derive(Serialize, Deserialize)]
+pub struct RegisterTask {
+    pub(crate) task: Task,
+    pub(crate) size: PaneSize
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ResizeTask {
+    pub(crate) task_id: TaskId,
+    pub(crate) size: PaneSize
+}
 
 impl MasterControl {
     pub fn new(output_tx: Sender<ProcOutput>) -> MasterControl {
@@ -25,7 +41,6 @@ impl MasterControl {
         }
     }
 
-
     /***
     Get a Sender<String> clone on which to forward data from stdin
      */
@@ -36,9 +51,23 @@ impl MasterControl {
     /***
     Register a new task with the orchestrator
      */
-    pub fn register(&mut self, task: Task) -> anyhow::Result<()> {
-        self.send_command("register", &serde_json::to_string(&task)?);
+    pub fn register(&mut self, task: Task, size: PaneSize) -> anyhow::Result<()> {
+        let metadata = RegisterTask { task, size };
+
+        self.send_command("register", &serde_json::to_string(&metadata)?);
         let resp = self.await_response("register")?;
+        if resp.trim() == "Success" {
+            Ok(())
+        } else {
+            bail!(simple_error::simple_error!(resp));
+        }
+    }
+
+    pub fn resize(&mut self, task_id: &TaskId, size: PaneSize) -> anyhow::Result<()> {
+        let metadata = ResizeTask { task_id: task_id.to_owned(), size };
+
+        self.send_command("resize", &serde_json::to_string(&metadata)?);
+        let resp = self.await_response("resize")?;
         if resp.trim() == "Success" {
             Ok(())
         } else {
@@ -49,18 +78,23 @@ impl MasterControl {
     /***
     Select a child process to forward stdin to 
      */
-    pub fn activate_proc(&mut self, handle: &String) -> anyhow::Result<()> {
+    pub fn activate_proc(&mut self, task_id: &TaskId, pane: &Pane) -> anyhow::Result<()> {
         // TODO: Finish wiring this up.
         //  Probably need to track tasks within ProcessOrchestrator again
-        self.send_command("activate", handle)?;
+        let resize_task = ResizeTask { task_id: task_id.clone(), size: Some((pane.width, pane.height)) };
+        self.send_command("resize", &serde_json::to_string(&resize_task)?);
+        self.await_response("resize")?;
+
+        self.send_command("activate", task_id)?;
         self.await_response("activate")?;
+
         Ok(())
     }
 
     /***
     Execute a task by name
      */
-    pub fn execute(&mut self, name: &String) -> anyhow::Result<()> {
+    pub fn execute(&mut self, name: &str) -> anyhow::Result<()> {
         self.send_command("execute", name)?;
         self.await_response("execute")?;
         Ok(())

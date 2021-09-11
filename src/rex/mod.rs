@@ -6,8 +6,10 @@ pub(crate) mod child;
 mod process_orchestrator;
 mod master_control;
 pub(crate) mod terminal;
+pub(crate) mod config;
 
 use serde::{Deserialize, Serialize};
+use crate::rex::master_control::PaneSize;
 
 pub struct ProcOutput { pub name: String, pub output: String }
 
@@ -21,26 +23,21 @@ pub struct MasterControl {
 
 pub type TaskId = String;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Task {
     pub id: TaskId,
     pub name: String,
     pub command: String,
-    pub height: u16,
-    pub width: u16
 }
 
 impl Task {
-    pub fn new(id: &str, name: &str, command: &str, height: u16, width: u16) -> Task {
+    pub fn new(id: &str, name: &str, command: &str) -> Task {
         Task {
             id: id.into(),
             name: name.into(),
-            command: command.into(),
-            height,
-            width
+            command: command.into()
         }
     }
-
 }
 
 //  All of the threaded functionality  lives in the  "real" orchestrator class
@@ -50,6 +47,7 @@ impl Task {
 struct ProcessOrchestrator {
     // Track all of our registered tasks
     tasks: HashMap<String, Task>,
+    sizes: HashMap<String, PaneSize>,
 
     // Should we keep running?
     shutdown: bool,

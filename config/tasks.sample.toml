@@ -1,0 +1,32 @@
+# Tasks definition
+# A task has the following definitions
+#   id: A unique identifier for this task, so you can refer back to it in [[windows]]
+#   name: A short human-readable identifier for the task
+#   description: A short human-readable description of the task
+#   path: The path to run the command in - Ex: "/home/lucas/Software/dark_goggles-0.1/bin"
+#   command: The command to run. Ex: "./dark_goggles hourly"
+#   period: Optional. For widget-style tasks which should be refreshed and passively displayed.
+#           Period is the time between refreshes. Expects a digit plus an optional unit character.
+#           Ex: "10m" for ten minutes.
+
+[[tasks]]
+    id = "time"
+    name = "Date and Time"
+    description = "See the current date and time"
+    path = "."
+    command = "date"
+    period = "1s"
+
+# A Pane has the following definitions
+#   x: The left coordinate for the window. 1-based
+#   y: The top coordinate for the window. 1-based
+#   width: The width of the window
+#   height: The height of the window
+#   task_id: The id of a task defined above to display in this window.
+
+[[panes]]
+    x = 20
+    y = 1
+    width = 28
+    height = 1
+    task_id = "time"
