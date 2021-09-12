@@ -154,7 +154,7 @@ impl GlyphString {
             pad_width = output.len() + (pad_width - self.len());
         }
 
-        write!(target, "{0: <1$}", output, pad_width);
+        write!(target, "{0: <1$}", output, pad_width)?;
 
         Ok(())
     }
@@ -198,7 +198,7 @@ mod tests {
         g.push("a line of text", &ps);
 
         let mut output = Vec::new();
-        g.write(1, 3, 14, ps, &mut output);
+        g.write(1, 3, 14, ps, &mut output).unwrap();
 
         assert_eq!(output, b"\x1b[3;1Ha line of text");
     }
@@ -211,7 +211,7 @@ mod tests {
         g.push("a line of text", &ps);
 
         let mut output = Vec::new();
-        g.write(1, 3, 15, ps, &mut output);
+        g.write(1, 3, 15, ps, &mut output).unwrap();
 
         assert_eq!(output, b"\x1b[3;1Ha line of text ");
     }
@@ -220,16 +220,16 @@ mod tests {
     fn it_respects_glyph_styles() {
         let mut g = GlyphString::new();
         let mut ps = PrintStyle::default();
-        ps.apply_vt100("\x1b[32m");
+        ps.apply_vt100("\x1b[32m").unwrap();
 
         g.push("a line", &ps);
 
-        ps.apply_vt100("\x1b[37m");
+        ps.apply_vt100("\x1b[37m").unwrap();
 
         g.push(" of text", &ps);
 
         let mut output = Vec::new();
-        g.write(1, 3, 14, ps, &mut output);
+        g.write(1, 3, 14, ps, &mut output).unwrap();
 
         assert_eq!(std::str::from_utf8(&output).unwrap(), "\x1b[3;1H\x1b[32ma line\x1b[37m of text");
     }

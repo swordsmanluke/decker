@@ -4,7 +4,7 @@ use crate::rex::terminal::internal::StreamState;
 use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
 use std::cmp::{min, max};
 use std::io::Write;
-use log::{info, warn, error};
+use log::{info, error};
 use anyhow::bail;
 use std::fmt::{Display, Formatter};
 
@@ -479,7 +479,7 @@ impl Pane {
         let y_off = self.y;
         let width = self.width;
 
-        self.lines.iter_mut().for_each(|mut line| {
+        self.lines.iter_mut().for_each(|line| {
             if line.dirty() || line.empty() {
                 info!("Printing plaintext@({},{}): {:?}", x_off, y_off + line_idx, line.plaintext());
                 line.write(x_off, y_off + line_idx, width, ps, target).unwrap();

@@ -1,4 +1,4 @@
-use crate::rex::{ProcessOrchestrator, ProcOutput, Task};
+use crate::rex::{ProcessOrchestrator, ProcOutput};
 use crate::rex::child::ChildProcess;
 use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError};
 use std::collections::HashMap;

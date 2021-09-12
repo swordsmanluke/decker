@@ -22,14 +22,15 @@ impl PaneManager {
         }
     }
 
-    pub fn write(&mut self, target: &mut dyn Write) {
+    pub fn write(&mut self, target: &mut dyn Write) -> anyhow::Result<()>{
         for (task_id, pane) in self.panes.iter_mut() {
             info!("Writing output for {}", task_id);
             pane.write(target).unwrap();
         }
         // send the cursor to the main pane's location
         let main_pane = self.find_by_id("main").unwrap();
-        main_pane.take_cursor(target);
+        main_pane.take_cursor(target)?;
+        Ok(())
     }
 
     pub fn push(&mut self, task_id: TaskId, data: &String) {

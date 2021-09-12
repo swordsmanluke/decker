@@ -1,7 +1,7 @@
 use crate::rex::Task;
 use std::fs::File;
 use std::io::Read;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use toml::de::Error;
 
 #[derive(Deserialize, Clone)]

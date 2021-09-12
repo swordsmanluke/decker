@@ -7,7 +7,7 @@ use termion::raw::IntoRawMode;
 use crate::rex::{Task, MasterControl, TaskId};
 use crate::rex::terminal::pane::Pane;
 use crate::rex::terminal::PaneManager;
-use crate::rex::config::{load_task_config, PaneDefinition};
+use crate::rex::config::load_task_config;
 
 mod rex;
 
@@ -37,8 +37,8 @@ fn run() -> anyhow::Result<()> {
 
     // create panes from cfg
     for p in hex_cfg.panes {
-        let newPane= Pane::new(&p.task_id, p.x, p.y, p.height, p.width);
-        pane_manager.register(p.task_id, newPane);
+        let new_pane = Pane::new(&p.task_id, p.x, p.y, p.height, p.width);
+        pane_manager.register(p.task_id, new_pane);
     }
 
     //  and register tasks from cfg
@@ -75,7 +75,7 @@ fn run() -> anyhow::Result<()> {
         match output {
             Some(pout) => {
                 pane_manager.push(pout.name, &pout.output);
-                pane_manager.write(&mut stdout);
+                pane_manager.write(&mut stdout)?;
                 stdout.flush()?;
             }
             None => {}

@@ -31,7 +31,7 @@ impl MasterControl {
 
         thread::spawn(move || {
             info!("Starting ProcessOrchestrator");
-            orchestrator.run();
+            orchestrator.run().unwrap();
         });
 
         MasterControl {
@@ -54,7 +54,7 @@ impl MasterControl {
     pub fn register(&mut self, task: Task, size: PaneSize) -> anyhow::Result<()> {
         let metadata = RegisterTask { task, size };
 
-        self.send_command("register", &serde_json::to_string(&metadata)?);
+        self.send_command("register", &serde_json::to_string(&metadata)?)?;
         let resp = self.await_response("register")?;
         if resp.trim() == "Success" {
             Ok(())
@@ -66,7 +66,7 @@ impl MasterControl {
     pub fn resize(&mut self, task_id: &TaskId, size: PaneSize) -> anyhow::Result<()> {
         let metadata = ResizeTask { task_id: task_id.to_owned(), size };
 
-        self.send_command("resize", &serde_json::to_string(&metadata)?);
+        self.send_command("resize", &serde_json::to_string(&metadata)?)?;
         let resp = self.await_response("resize")?;
         if resp.trim() == "Success" {
             Ok(())
@@ -82,7 +82,7 @@ impl MasterControl {
         // TODO: Finish wiring this up.
         //  Probably need to track tasks within ProcessOrchestrator again
         let resize_task = ResizeTask { task_id: task_id.clone(), size: Some((pane.width, pane.height)) };
-        self.send_command("resize", &serde_json::to_string(&resize_task)?);
+        self.send_command("resize", &serde_json::to_string(&resize_task)?)?;
         self.await_response("resize")?;
 
         self.send_command("activate", task_id)?;

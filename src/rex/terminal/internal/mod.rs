@@ -104,7 +104,7 @@ impl StreamState {
     pub fn is_complete(&self) -> bool {
         // If we have anything vetted, go consume it!
         let have_vetted_output = self.vetted_output.iter().any(
-            |v| match (v) {
+            |v| match v {
                 Plaintext(s) => { !s.is_empty() }
                 CSI(s) => { !s.is_empty() }
             }
