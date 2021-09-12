@@ -24,7 +24,6 @@ impl PaneManager {
 
     pub fn write(&mut self, target: &mut dyn Write) -> anyhow::Result<()>{
         for (task_id, pane) in self.panes.iter_mut() {
-            info!("Writing output for {}", task_id);
             pane.write(target).unwrap();
         }
         // send the cursor to the main pane's location

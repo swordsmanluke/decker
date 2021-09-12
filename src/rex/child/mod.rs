@@ -9,6 +9,7 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system, PtyPair};
 
 pub struct ChildProcess {
     command: String,
+    path: String,
     shutdown: bool,
     input_receiver: Receiver<String>,
     input_sender: Sender<String>,
@@ -18,10 +19,11 @@ pub struct ChildProcess {
 }
 
 impl ChildProcess {
-    pub fn new(command: &str, out_tx: Sender<String>, status_tx: Sender<String>, size: (u16,u16)) -> ChildProcess {
+    pub fn new(command: &str, path: &str, out_tx: Sender<String>, status_tx: Sender<String>, size: (u16,u16)) -> ChildProcess {
         let (in_tx, in_rx) = channel();
         ChildProcess {
             command: command.to_owned(),
+            path: path.to_owned(),
             shutdown: false,
             input_receiver: in_rx,
             input_sender: in_tx,
@@ -55,6 +57,9 @@ impl ChildProcess {
         let mut reader = child.master.try_clone_reader()?;
         let sender = self.output_sender.clone();
         let (stop_tx, stop_rx) = channel();
+        let command = self.command.clone();
+
+        sender.send(String::from("\x1b[2J")); // Clear the screen when we launch
 
         let out_loop = std::thread::spawn( move || {
             let mut output = [0u8; 1024];
@@ -63,7 +68,7 @@ impl ChildProcess {
                 let size = reader.read(&mut output).unwrap_or(0);
                 sender.send(String::from_utf8(output[..size].to_owned()).unwrap()).unwrap();
             };
-            info!("Exited output loop!")
+            info!("Exited {} output loop!", command)
         });
 
         loop {
@@ -116,7 +121,13 @@ impl ChildProcess {
         })?;
 
         // TODO: Split command to handle args
-        let cmd = CommandBuilder::new(self.command.as_str());
+        let mut cmd_and_args = self.command.split_ascii_whitespace();
+        let command = cmd_and_args.next().unwrap();
+        let args = cmd_and_args.collect::<Vec<_>>();
+
+        let mut cmd = CommandBuilder::new(command);
+        cmd.cwd(self.path.clone());
+        if args.len() > 0 { cmd.args(args); }
 
         pair.slave.spawn_command(cmd)?;
         Ok(pair)

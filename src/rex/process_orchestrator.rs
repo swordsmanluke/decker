@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::thread;
 use log::info;
 use crate::rex::master_control::{RegisterTask, ResizeTask};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 impl ProcessOrchestrator {
     /***
@@ -19,6 +20,7 @@ impl ProcessOrchestrator {
         ProcessOrchestrator {
             tasks: HashMap::new(),
             sizes: HashMap::new(),
+            last_run: HashMap::new(),
             command_rx: cmd_rx,
             resp_tx: resp_tx,
             output_tx,
@@ -46,6 +48,7 @@ impl ProcessOrchestrator {
             self.forward_input()?;
             self.process_output()?;
             self.process_commands()?;
+            self.run_periodic_tasks()?;
 
             if self.shutdown {
                 info!("Shutting down Orchestrator");
@@ -126,6 +129,8 @@ impl ProcessOrchestrator {
                 info!("Could not find task {} to execute in {:?}", task_id, self.tasks.keys());
             }
             Some(task) => {
+                self.last_run.insert(task_id.to_string(), SystemTime::now());
+
                 let size = self.sizes.get(task_id);
                 if size.is_none() {
                     info!("Cannot run {} - no terminal size was assigned! Does this have a pane?", task_id);
@@ -140,9 +145,9 @@ impl ProcessOrchestrator {
                         let (out_tx, out_rx) = channel();
                         let (status_tx, status_rx) = channel();
                         let mut new_kid = ChildProcess::new(task.command.as_str(),
+                                                            task.path.as_str(),
                                                             out_tx, status_tx.clone(),
                                                             (*height, *width));
-
                         // TODO: What if this task already has named channels? Should I only create once
                         //       and reuse? Or replace them every time?
                         self.proc_io_channels.insert(task_id.to_string(), (new_kid.input_tx(), out_rx));
@@ -205,6 +210,25 @@ impl ProcessOrchestrator {
 
         Ok(())
     }
+
+    fn run_periodic_tasks(&mut self) -> anyhow::Result<()> {
+        let ready_task_ids = self.tasks.iter().
+            filter(|(_, t)| t.period.is_some()). // period tasks
+            filter(|(id, t)| {          // which are redy to run
+                let time_of_last_run = *self.last_run.get(*id).unwrap_or(&UNIX_EPOCH);
+                let elapsed = SystemTime::now().duration_since(time_of_last_run).unwrap().as_secs();
+                t.ready_to_run(elapsed)
+            }).map(|(id, _)| id.clone()).
+            collect::<Vec<String>>();
+
+        //  Separate loops to satisfy borrow checker
+        for id in ready_task_ids {
+            self.execute(&id);
+        }
+
+        Ok(())
+    }
+
 }
 
 #[cfg(test)]

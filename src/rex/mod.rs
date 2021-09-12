@@ -10,6 +10,7 @@ pub(crate) mod config;
 
 use serde::{Deserialize, Serialize};
 use crate::rex::master_control::PaneSize;
+use std::time::SystemTime;
 
 pub struct ProcOutput { pub name: String, pub output: String }
 
@@ -28,14 +29,29 @@ pub struct Task {
     pub id: TaskId,
     pub name: String,
     pub command: String,
+    pub path: String,
+    pub period: Option<String>
 }
 
 impl Task {
-    pub fn new(id: &str, name: &str, command: &str) -> Task {
-        Task {
-            id: id.into(),
-            name: name.into(),
-            command: command.into()
+    pub fn ready_to_run(&self, elapsed: u64) -> bool {
+        match self.period.clone() {
+            None => { true } // aperiodic tasks can always be run
+            Some(period_string) => {
+                let base = regex::Regex::new("([0-9]+).*").unwrap().
+                    captures(&period_string).unwrap().
+                    get(1).unwrap().
+                    as_str().to_string().
+                    parse::<u64>().unwrap();
+
+                let period_seconds = match period_string.chars().last() {
+                    Some('h') => base * 3600,
+                    Some('m') => base * 60,
+                    _ => base
+                };
+
+                elapsed > period_seconds
+            }
         }
     }
 }
@@ -48,6 +64,7 @@ struct ProcessOrchestrator {
     // Track all of our registered tasks
     tasks: HashMap<String, Task>,
     sizes: HashMap<String, PaneSize>,
+    last_run: HashMap<TaskId, SystemTime>,
 
     // Should we keep running?
     shutdown: bool,

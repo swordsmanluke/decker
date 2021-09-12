@@ -4,7 +4,7 @@ use log::info;
 use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::IntoRawMode;
-use crate::rex::{Task, MasterControl, TaskId};
+use crate::rex::{MasterControl, TaskId};
 use crate::rex::terminal::pane::Pane;
 use crate::rex::terminal::PaneManager;
 use crate::rex::config::load_task_config;
@@ -49,7 +49,7 @@ fn run() -> anyhow::Result<()> {
                 mcp.register(task, None)?;
             }
             Some(p) => {
-                mcp.register(Task::new(&task.id, &task.name, &task.command), Some((p.width, p.height)))?;
+                mcp.register(task.clone(), Some((p.width, p.height)))?;
             }
         }
     }
