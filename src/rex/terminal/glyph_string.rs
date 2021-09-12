@@ -3,7 +3,7 @@ use regex::{Regex};
 use std::cmp::{max, min};
 use crate::rex::terminal::pane::PrintStyle;
 use std::io::Write;
-use log::info;
+use log::{debug, info};
 use std::fmt::{Debug, Formatter};
 
 #[derive(Clone)]
@@ -53,6 +53,13 @@ impl GlyphString {
 
     pub fn dirty(&self) -> bool {
         self.glyphs.iter().any(|g| g.dirty)
+    }
+
+    pub fn empty(&self) -> bool {
+        // Short lines are probably blanks
+        // otherwise, if all the glyphs are spaces, we're empty.
+        self.glyphs.len() < 2 ||
+            self.glyphs.iter().all(|g| g.c == ' ')
     }
 
     pub fn make_dirty(&mut self) {
@@ -111,14 +118,12 @@ impl GlyphString {
         self.glyphs.clear();
     }
 
-    pub fn write(&mut self, x_offset: u16, y_offset: u16, width: u16, cur_style: PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
-        // TODO: Determine if we're dirty before deciding whether to print ourselves!
-
+    pub fn write(&mut self, x_offset: u16, y_offset: u16, width: u16, style: PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
         // goto the offset for our line
         let mut output = String::new();
         output.push_str(&format!("\x1b[{};{}H", y_offset, x_offset));
 
-        let mut cur_style = cur_style.clone(); // No mutating args!
+        let mut cur_style = style.clone(); // No mutating args!
         let visible_width = min(self.len(), width as usize);
 
         self.glyphs.iter_mut().take(visible_width).for_each(|g| {
@@ -128,12 +133,20 @@ impl GlyphString {
             let diff = cur_style.diff_str(&g.state);
 
             if diff.len() > 0 {
+                debug!("Updating style. FG/BG: {}/{} Str: {}", g.state.foreground, g.state.background, g.c);
                 cur_style = g.state;
                 output.push_str(&diff);
             }
 
             output.push(g.c);
         });
+
+        // reset to the og style
+        let diff = cur_style.diff_str(&style);
+        if diff.len() > 0 {
+            output.push_str(&diff);
+        }
+
         let mut pad_width = width as usize;
         if self.len() < pad_width {
             // Have to pad the final output string length, 'cause the writer doesn't handle
@@ -155,7 +168,7 @@ impl GlyphString {
     }
 
     pub fn plaintext(&self) -> String {
-        self.glyphs.iter().map(|g| g.c.to_string()).collect::<Vec<String>>().join(" ")
+        self.glyphs.iter().map(|g| g.c.to_string()).collect::<Vec<String>>().join("")
     }
 
     pub fn to_str(&self, current_state: &PrintStyle) -> String {

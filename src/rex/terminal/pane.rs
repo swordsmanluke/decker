@@ -6,6 +6,7 @@ use std::cmp::{min, max};
 use std::io::Write;
 use log::{info, warn, error};
 use anyhow::bail;
+use std::fmt::{Display, Formatter};
 
 pub struct Pane {
     pub id: String,
@@ -40,6 +41,12 @@ pub enum Color {
     White,
     TWOFIFTYSIX(u8),
     RGB(u8, u8, u8),
+}
+
+impl Display for Color {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(format!("{:?}", self).as_str())
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -340,8 +347,6 @@ impl Pane {
         for out in self.stream_state.consume() {
             match out {
                 Plaintext(plain) => {
-                    info!("Printing plaintext: {:?}", plain);
-
                     for c in plain.chars() {
                         match c {
                             '\u{7}' => { /* Bell */ print!("\u{7}")}
@@ -367,6 +372,15 @@ impl Pane {
                                     self.cursor.set_y(self.height);
                                     self.lines.push(GlyphString::new());
                                     self.lines.iter_mut().for_each(|l| l.make_dirty());
+                                }
+                            }
+                            '\t' => {
+                                // Replace tabs with 4 spaces
+                                let vert_line = self.cursor.y - 1;
+                                let line = self.lines.get_mut(vert_line as usize).unwrap();
+                                for _ in 0..4 {
+                                    line.set((self.cursor.x - 1) as usize, Glyph::new(' ', self.print_state));
+                                    self.cursor.incr_x(1);
                                 }
                             }
                             '\r' => {
@@ -466,7 +480,8 @@ impl Pane {
         let width = self.width;
 
         self.lines.iter_mut().for_each(|mut line| {
-            if line.dirty() {
+            if line.dirty() || line.empty() {
+                info!("Printing plaintext@({},{}): {:?}", x_off, y_off + line_idx, line.plaintext());
                 line.write(x_off, y_off + line_idx, width, ps, target).unwrap();
             }
             line_idx +=1;

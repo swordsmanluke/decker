@@ -1,2 +1,4 @@
 /target
 config/tasks.toml
+flamegraph.svg
+perf.data
