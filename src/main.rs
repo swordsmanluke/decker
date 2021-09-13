@@ -5,7 +5,7 @@ use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::IntoRawMode;
 use crate::rex::{MasterControl, TaskId};
-use crate::rex::terminal::pane::Pane;
+use crate::rex::terminal::pane::{Pane, ScrollMode};
 use crate::rex::terminal::PaneManager;
 use crate::rex::config::load_task_config;
 
@@ -37,7 +37,8 @@ fn run() -> anyhow::Result<()> {
 
     // create panes from cfg
     for p in hex_cfg.panes {
-        let new_pane = Pane::new(&p.task_id, p.x, p.y, p.height, p.width);
+        let mut new_pane = Pane::new(&p.task_id, p.x, p.y, p.height, p.width);
+        if p.is_main() { new_pane.set_scroll_mode(ScrollMode::Scroll); }
         pane_manager.register(p.task_id, new_pane);
     }
 

@@ -9,6 +9,12 @@ use anyhow::bail;
 use std::fmt::{Display, Formatter};
 use lazy_static::lazy_static;
 
+#[derive(Eq, PartialEq)]
+pub enum ScrollMode {
+    Scroll,
+    Fixed
+}
+
 pub struct Pane {
     pub id: String,
     // Location and Dimensions
@@ -16,6 +22,8 @@ pub struct Pane {
     pub y: u16,
     pub height: u16,
     pub width: u16,
+
+    scroll_mode: ScrollMode,
 
     // Cached lines
     lines: Vec<GlyphString>,
@@ -72,7 +80,6 @@ impl Cursor {
     }
 
     pub fn set_y(&mut self, n: u16) {
-        info!("Changing cursor y from {} to {}", self.y, n);
         self.y = n
     }
 
@@ -335,10 +342,15 @@ impl Pane {
             height,
             width,
             lines,
+            scroll_mode: ScrollMode::Fixed,
             cursor: Cursor::new(),
             print_state: PrintStyle::default(),
             stream_state: StreamState::new(),
         }
+    }
+
+    pub fn set_scroll_mode(&mut self, mode: ScrollMode) {
+        self.scroll_mode = mode;
     }
 
     pub fn push(&mut self, s: &str) -> anyhow::Result<()> {
@@ -365,14 +377,22 @@ impl Pane {
                                 self.cursor.incr_y(1);
 
                                 // If we advance beyond the end of the pane bounds
-                                // discard the topmost line of output and add a new
-                                // line to the end.
+                                // check our scroll mode. If we're scrolling, discard
+                                // the topmost line of output and add a new line to the end.
+                                // If we are Fixed, just discard everything past this point
                                 if self.cursor.y >= self.height {
-                                    info!("Scrolling past bottom of screen. Pop the topmost line off the stack");
-                                    info!("Popped '{:?}'", self.lines.remove(0));
-                                    self.cursor.set_y(self.height);
-                                    self.lines.push(GlyphString::new());
-                                    self.lines.iter_mut().for_each(|l| l.make_dirty());
+                                    match self.scroll_mode {
+                                        ScrollMode::Scroll => {
+                                            info!("{}: Scrolling past bottom of screen. Pop the topmost line off the stack", self.id);
+                                            info!("{}: Popped '{:?}'", self.id, self.lines.remove(0));
+                                            self.cursor.set_y(self.height);
+                                            self.lines.push(GlyphString::new());
+                                            self.lines.iter_mut().for_each(|l| l.make_dirty());
+                                        }
+                                        ScrollMode::Fixed => {
+                                            info!("{}: Fixed mode - won't scroll to display", self.id)
+                                        }
+                                    }
                                 }
                             }
                             '\t' => {
@@ -389,10 +409,14 @@ impl Pane {
                                 self.cursor.set_x(1);
                             }
                             _ => {
-                                let vert_line = self.cursor.y - 1;
-                                let line = self.lines.get_mut(vert_line as usize).unwrap();
-                                line.set((self.cursor.x - 1) as usize, Glyph::new(c, self.print_state));
-                                self.cursor.incr_x(1);
+                                if self.scroll_mode == ScrollMode::Fixed && self.cursor.y >= self.height {
+                                    info!("{}: Ignoring output past end of viewable area", self.id)
+                                } else {
+                                    let vert_line = self.cursor.y - 1;
+                                    let line = self.lines.get_mut(vert_line as usize).unwrap();
+                                    line.set((self.cursor.x - 1) as usize, Glyph::new(c, self.print_state));
+                                    self.cursor.incr_x(1);
+                                }
                             }
                         }
                     }
@@ -403,7 +427,7 @@ impl Pane {
                     // 2) Move the cursor
                     // 3) Clear some text
                     // 4) Print to the terminal as if it were plaintext
-                    info!("Handling CSI: {:?}", vt100_code);
+                    info!("{}: Handling CSI: {:?}", self.id, vt100_code);
                     let last_char = vt100_code.chars().last().unwrap();
                     match last_char {
                         'm' => { self.print_state.apply_vt100(&vt100_code)? }
@@ -455,13 +479,13 @@ impl Pane {
                                     // TODO: Send this as input
                                 }
                                 _ => {
-                                    info!("Unhandled query!");
+                                    info!("{}: Unhandled query!", self.id);
                                 }
                             }
                         }
                         _ => {
                             /* Just print these directly... I guess */
-                            info!("Unknown CSI {:?}", vt100_code);
+                            info!("{}: Unknown CSI {:?}", self.id, vt100_code);
                             print!("{}", vt100_code);
                         }
                     }
@@ -480,11 +504,12 @@ impl Pane {
         let x_off = self.x;
         let y_off = self.y;
         let width = self.width;
+        let pane_id = self.id.as_str();
 
         self.lines.iter_mut().for_each(|line| {
             if line.dirty() || line.empty() {
                 if !line.empty() {
-                    info!("Printing plaintext@({},{}): {:?}", x_off, y_off + line_idx, line.plaintext());
+                    info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
                 }
                 line.write(x_off, y_off + line_idx, width, ps, target).unwrap();
             }
@@ -498,7 +523,7 @@ impl Pane {
         // put cursor where it belongs
         let global_y = self.cursor.y + self.y - 1;
         let global_x = self.cursor.x + self.x - 1;
-        info!("Putting cursor at {}x{}y (global: {},{})", self.cursor.x, self.cursor.y, global_x, global_y);
+        info!("{}: Putting cursor at {}x{}y (global: {},{})", self.id, self.cursor.x, self.cursor.y, global_x, global_y);
         write!(target, "\x1b[{};{}H", global_y, global_x)?;
         Ok(())
     }
@@ -523,7 +548,7 @@ impl Pane {
                 match Pane::deletion_type(vt100_code) {
                     None => {
                         /*Delete to end of line*/
-                        info!("Clearing {}:{} -> {}", self.cursor.y - 1, self.cursor.x, self.width);
+                        info!("{}: Clearing {}:{} -> {}", self.id, self.cursor.y - 1, self.cursor.x, self.width);
                         let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear_after(self.cursor.x as usize);
                     }
@@ -575,6 +600,9 @@ impl Pane {
                             let line = self.lines.get_mut(line_idx as usize).unwrap();
                             line.clear();
                         }
+                        // Reset the cursor location
+                        self.cursor.x = 1;
+                        self.cursor.y = 1;
                     }
                     Some(i) => {
                         /*Invalid*/
