@@ -59,14 +59,18 @@ impl ChildProcess {
         let (stop_tx, stop_rx) = channel();
         let command = self.command.clone();
 
-        sender.send(String::from("\x1b[2J")); // Clear the screen when we launch
-
         let out_loop = std::thread::spawn( move || {
             let mut output = [0u8; 1024];
-
+            let mut first_out = true;
             while let Err(TryRecvError::Empty) = stop_rx.try_recv() {
                 let size = reader.read(&mut output).unwrap_or(0);
-                sender.send(String::from_utf8(output[..size].to_owned()).unwrap()).unwrap();
+                if size > 0 {
+                    if first_out {
+                        sender.send(String::from("\x1b[2J")); // Clear the screen when we launch
+                        first_out = false
+                    }
+                    sender.send(String::from_utf8(output[..size].to_owned()).unwrap()).unwrap();
+                }
             };
             info!("Exited {} output loop!", command)
         });

@@ -483,7 +483,9 @@ impl Pane {
 
         self.lines.iter_mut().for_each(|line| {
             if line.dirty() || line.empty() {
-                info!("Printing plaintext@({},{}): {:?}", x_off, y_off + line_idx, line.plaintext());
+                if !line.empty() {
+                    info!("Printing plaintext@({},{}): {:?}", x_off, y_off + line_idx, line.plaintext());
+                }
                 line.write(x_off, y_off + line_idx, width, ps, target).unwrap();
             }
             line_idx += 1;
