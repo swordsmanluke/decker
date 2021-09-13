@@ -7,6 +7,7 @@ use std::io::Write;
 use log::{info, error};
 use anyhow::bail;
 use std::fmt::{Display, Formatter};
+use lazy_static::lazy_static;
 
 pub struct Pane {
     pub id: String,
@@ -57,7 +58,7 @@ pub struct PrintStyle {
     pub underline: bool,
     pub blink: bool,
     pub bold: bool,
-    pub invert: bool
+    pub invert: bool,
 }
 
 struct Cursor {
@@ -94,7 +95,7 @@ impl Cursor {
     pub fn new() -> Self {
         Cursor {
             x: 1, // screen is 1-indexed
-            y: 1
+            y: 1,
         }
     }
 }
@@ -151,6 +152,12 @@ impl Default for PrintStyle {
     }
 }
 
+lazy_static! {
+    static ref parm_rx: Regex = Regex::new("\x1b\\[([0-9;]*)%?m").unwrap();
+    static ref home_regex: Regex = Regex::new("\x1b\\[(\\d*);?(\\d*).").unwrap();
+    static ref cur_move_regex: Regex = Regex::new("\x1b\\[(\\d*).").unwrap();
+}
+
 impl PrintStyle {
     /****
     Returns the VT100 codes required to transform self -> other, but does not mutate
@@ -167,23 +174,19 @@ impl PrintStyle {
         }
 
         if self.underline != other.underline {
-            if other.underline { out += "\x1b[4m" }
-            else { out += "\x1b[24m" }
+            if other.underline { out += "\x1b[4m" } else { out += "\x1b[24m" }
         }
 
         if self.blink != other.blink {
-            if other.blink { out += "\x1b[5m" }
-            else { out += "\x1b[25m" }
+            if other.blink { out += "\x1b[5m" } else { out += "\x1b[25m" }
         }
 
         if self.italicized != other.italicized {
-            if other.italicized { out += "\x1b[3m" }
-            else { out += "\x1b[23m" }
+            if other.italicized { out += "\x1b[3m" } else { out += "\x1b[23m" }
         }
 
         if self.invert != other.invert {
-             if other.invert { out += "\x1b[7m" }
-            else { out += "\x1b[27m" }
+            if other.invert { out += "\x1b[7m" } else { out += "\x1b[27m" }
         }
 
         out
@@ -243,7 +246,7 @@ impl PrintStyle {
         fg_str
     }
 
-    pub fn reset(&mut self) -> anyhow::Result<()>{
+    pub fn reset(&mut self) -> anyhow::Result<()> {
         // Keep this in sync with Self::default()
         self.foreground = Color::White;
         self.background = Color::Black;
@@ -258,7 +261,6 @@ impl PrintStyle {
     pub fn apply_vt100(&mut self, s: &str) -> anyhow::Result<()> {
         info!("Attempting to apply SGR command '{:?}'", s);
 
-        let parm_rx = Regex::new("\x1b\\[([0-9;]*)%?m").unwrap();
         match parm_rx.captures(s) {
             None => { bail!("'{:?}' does not look like an SGR sequence!", s) }
             Some(captures) => {
@@ -349,8 +351,9 @@ impl Pane {
                 Plaintext(plain) => {
                     for c in plain.chars() {
                         match c {
-                            '\u{7}' => { /* Bell */ print!("\u{7}")}
-                            '\u{8}' => { /* Backspace */
+                            '\u{7}' => { /* Bell */ print!("\u{7}") }
+                            '\u{8}' => {
+                                /* Backspace */
                                 let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                                 if self.cursor.x > 1 {
                                     self.cursor.decr_x(1);
@@ -420,16 +423,16 @@ impl Pane {
                                 // Bracketed paste is safe to just send direct to STDOUT. We
                                 // won't be running more than one active program at a time, so
                                 // it shouldn't matter.
-                                "\x1b[?2004h" |  /* Bracketed paste mode ON */
-                                "\x1b[?2004l" |  /* Bracketed paste mode OFF */
-                                "\x1b[?25l"   |  /* hide cursor */
-                                "\x1b[?25h"   |  /* show cursor */
+                                "\x1b[?2004h" | /* Bracketed paste mode ON */
+                                "\x1b[?2004l" | /* Bracketed paste mode OFF */
+                                "\x1b[?25l" | /* hide cursor */
+                                "\x1b[?25h" | /* show cursor */
                                 "\x1b[?34h"      /* underline cursor */
                                 => {
                                     // All of these can be managed by the
                                     // top level terminal emulator...
                                     // if vt100_code != "\x1b[?25l" {  /* hide cursor */
-                                        print!("{}", vt100_code);
+                                    print!("{}", vt100_code);
                                     // }
                                 }
                                 // Alternate screen
@@ -445,7 +448,8 @@ impl Pane {
                             }
                         }
                         'r' => { /* Set top and bottom lines of window. Ignored*/ }
-                        'n' => { /* Terminal queries */
+                        'n' => {
+                            /* Terminal queries */
                             match vt100_code.as_str() {
                                 "\x1b[6n" => {
                                     // Query the (virtual) cursor pos
@@ -484,7 +488,7 @@ impl Pane {
                 info!("Printing plaintext@({},{}): {:?}", x_off, y_off + line_idx, line.plaintext());
                 line.write(x_off, y_off + line_idx, width, ps, target).unwrap();
             }
-            line_idx +=1;
+            line_idx += 1;
         });
 
         Ok(())
@@ -517,27 +521,32 @@ impl Pane {
             }
             'K' => {
                 match Pane::deletion_type(vt100_code) {
-                    None => { /*Delete to end of line*/
+                    None => {
+                        /*Delete to end of line*/
                         info!("Clearing {}:{} -> {}", self.cursor.y - 1, self.cursor.x, self.width);
                         let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear_after(self.cursor.x as usize);
                     }
-                    Some(1) => { /* Delete to start of line */
+                    Some(1) => {
+                        /* Delete to start of line */
                         let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.delete_to(self.cursor.x as usize);
                     }
-                    Some(2) => { /* Delete entire line*/
+                    Some(2) => {
+                        /* Delete entire line*/
                         let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear();
                     }
-                    Some(i) => { /*Invalid*/
+                    Some(i) => {
+                        /*Invalid*/
                         error!("Unknown 'line delete' type '{}'. Ignoring!", i)
                     }
                 }
             }
             'J' => {
                 match Pane::deletion_type(vt100_code) {
-                    None => { /*Delete to end of screen*/
+                    None => {
+                        /*Delete to end of screen*/
                         // Clear the current line
                         let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear_after(self.cursor.x as usize);
@@ -548,7 +557,8 @@ impl Pane {
                             line.clear();
                         }
                     }
-                    Some(1) => { /* Delete to start of screen */
+                    Some(1) => {
+                        /* Delete to start of screen */
                         // Clear the current line
                         let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear_to(self.cursor.x as usize);
@@ -559,13 +569,15 @@ impl Pane {
                             line.clear();
                         }
                     }
-                    Some(2) => { /* Clear screen */
+                    Some(2) => {
+                        /* Clear screen */
                         for line_idx in 0..self.height {
                             let line = self.lines.get_mut(line_idx as usize).unwrap();
                             line.clear();
                         }
                     }
-                    Some(i) => { /*Invalid*/
+                    Some(i) => {
+                        /*Invalid*/
                         error!("Unknown 'screen delete' type '{}'. Ignoring!", i)
                     }
                 }
@@ -579,7 +591,6 @@ impl Pane {
         let last_char = vt100_code.chars().last().unwrap();
         match last_char {
             'H' | 'f' => {
-                let home_regex = Regex::new("\x1b\\[(\\d*);?(\\d*).")?;
                 let captures = home_regex.captures(vt100_code).unwrap();
 
                 let row = match captures.get(1) {
@@ -623,7 +634,6 @@ impl Pane {
     }
 
     fn cursor_move_amount(vt100_code: &str) -> anyhow::Result<u16> {
-        let cur_move_regex = Regex::new("\x1b\\[(\\d*).")?;
         let captures = cur_move_regex.captures(vt100_code).unwrap();
         let out = match captures.get(1) {
             None => { 1 }
@@ -634,11 +644,10 @@ impl Pane {
     }
 
     fn deletion_type(vt100_code: &str) -> Option<u16> {
-        let cur_move_regex = Regex::new("\x1b\\[(\\d*).").unwrap();
         let captures = cur_move_regex.captures(vt100_code).unwrap();
         match captures.get(1) {
             None => { None }
-            Some(m) => { if m.as_str().is_empty() { None} else { Some(m.as_str().to_owned().parse::<u16>().unwrap()) }}
+            Some(m) => { if m.as_str().is_empty() { None } else { Some(m.as_str().to_owned().parse::<u16>().unwrap()) } }
         }
     }
 

@@ -42,7 +42,8 @@ fn run() -> anyhow::Result<()> {
     }
 
     //  and register tasks from cfg
-    for task in hex_cfg.tasks {
+    for mut task in hex_cfg.tasks {
+        task.cache_period(); // TODO: This is an ugly solution
         let pane = pane_manager.find_by_id(&task.id);
         match pane {
             None => {

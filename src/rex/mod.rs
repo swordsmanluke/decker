@@ -11,6 +11,7 @@ pub(crate) mod config;
 use serde::{Deserialize, Serialize};
 use crate::rex::master_control::PaneSize;
 use std::time::SystemTime;
+use lazy_static::lazy_static;
 
 pub struct ProcOutput { pub name: String, pub output: String }
 
@@ -30,26 +31,39 @@ pub struct Task {
     pub name: String,
     pub command: String,
     pub path: String,
-    pub period: Option<String>
+    pub period: Option<String>,
+    period_secs: Option<u64>
+}
+
+lazy_static! {
+    static ref DIGITS_REGEX: regex::Regex = regex::Regex::new("([0-9]+).*").unwrap();
 }
 
 impl Task {
+    pub fn cache_period(&mut self) {
+        let period = self.period.clone().unwrap_or(String::new());
+
+        if self.period_secs.is_none() && self.period.is_some() {
+            // Determine the number of seconds
+            let base = DIGITS_REGEX.
+                captures(&period).unwrap().
+                get(1).unwrap().
+                as_str().to_string().
+                parse::<u64>().unwrap();
+            let period_seconds = match period.chars().last() {
+                Some('h') => base * 3600,
+                Some('m') => base * 60,
+                _ => base
+            };
+
+            self.period_secs = Some(period_seconds)
+        }
+    }
+
     pub fn ready_to_run(&self, elapsed: u64) -> bool {
-        match self.period.clone() {
+        match self.period_secs {
             None => { true } // aperiodic tasks can always be run
-            Some(period_string) => {
-                let base = regex::Regex::new("([0-9]+).*").unwrap().
-                    captures(&period_string).unwrap().
-                    get(1).unwrap().
-                    as_str().to_string().
-                    parse::<u64>().unwrap();
-
-                let period_seconds = match period_string.chars().last() {
-                    Some('h') => base * 3600,
-                    Some('m') => base * 60,
-                    _ => base
-                };
-
+            Some(period_seconds) => {
                 elapsed > period_seconds
             }
         }

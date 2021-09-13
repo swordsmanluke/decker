@@ -1,6 +1,12 @@
 use crate::rex::terminal::internal::VT100State::{FoundEsc, PlainText};
 use regex::Regex;
 use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref CSI_BEGINNING: Regex = Regex::new(r"(\x1b\[|\x9b|>|=)").unwrap();
+    static ref VT100_REGEX: Regex = Regex::new(r"((\x1b\[|\x9b|>|=)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e>=])+").unwrap();
+}
 
 enum VT100State {
     PlainText,
@@ -91,14 +97,11 @@ impl StreamState {
     }
 
     pub fn is_esc_seq(&self) -> bool {
-        let csi_beginning = Regex::new(r"(\x1b\[|\x9b|>|=)").unwrap();
-        csi_beginning.is_match(&self.buffer)
+        CSI_BEGINNING.is_match(&self.buffer)
     }
 
     fn is_esc_seq_complete(&self) -> bool {
-        // TODO: Make this regex static or a constant or something
-        let vt100_regex = Regex::new(r"((\x1b\[|\x9b|>|=)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e>=])+").unwrap();
-        self.is_esc_seq() && vt100_regex.is_match(&self.buffer)
+        self.is_esc_seq() && VT100_REGEX.is_match(&self.buffer)
     }
 
     pub fn is_complete(&self) -> bool {
