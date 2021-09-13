@@ -193,8 +193,6 @@ impl PrintStyle {
     }
 
     pub fn to_str(&self) -> String {
-        // TODO: Assemble a set of numbers to push together into a single command.
-
         // Check colors first
         let fg_str = self.foreground_string();
         let bg_str = self.background_string();

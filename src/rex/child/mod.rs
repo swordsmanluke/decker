@@ -120,7 +120,6 @@ impl ChildProcess {
             pixel_height: 0,
         })?;
 
-        // TODO: Split command to handle args
         let mut cmd_and_args = self.command.split_ascii_whitespace();
         let command = cmd_and_args.next().unwrap();
         let args = cmd_and_args.collect::<Vec<_>>();
