@@ -361,7 +361,6 @@ impl Pane {
                 Plaintext(plain) => {
                     for c in plain.chars() {
                         match c {
-                            '\u{7}' => { /* Bell */ print!("\u{7}") }
                             '\u{8}' => {
                                 /* Backspace */
                                 let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
@@ -409,13 +408,24 @@ impl Pane {
                                 self.cursor.set_x(1);
                             }
                             _ => {
-                                if self.scroll_mode == ScrollMode::Fixed && self.cursor.y >= self.height {
-                                    info!("{}: Ignoring output past end of viewable area", self.id)
-                                } else {
-                                    let vert_line = self.cursor.y - 1;
-                                    let line = self.lines.get_mut(vert_line as usize).unwrap();
-                                    line.set((self.cursor.x - 1) as usize, c, &self.print_state);
-                                    self.cursor.incr_x(1);
+                                // check to see if this is a printable character or not
+                                match c as u8 {
+                                    0x20..=0x7E => {
+                                        // Visible feckin' characters
+                                        if self.scroll_mode == ScrollMode::Fixed && self.cursor.y >= self.height {
+                                            info!("{}: Ignoring output past end of viewable area", self.id)
+                                        } else {
+                                            let vert_line = self.cursor.y - 1;
+                                            let line = self.lines.get_mut(vert_line as usize).unwrap();
+                                            let len = line.len();
+                                            line.set((self.cursor.x - 1) as usize, c, &self.print_state);
+                                            self.cursor.incr_x(1);
+                                        }
+                                    }
+                                    _ => {
+                                        // Special chars that don't have fill
+                                        print!("{}", c);
+                                    }
                                 }
                             }
                         }
