@@ -411,11 +411,12 @@ impl Pane {
                                 // Return to the start of this line!
                                 self.cursor.set_x(1);
                             }
+                            '\x7F' => { /* Delete */ }
                             _ => {
                                 // check to see if this is a printable character or not
                                 match c as u8 {
-                                    0x20..=0x7E => {
-                                        // Visible feckin' characters
+                                    0x20..=0xFF => {
+                                        // Visible characters
                                         if self.scroll_mode == ScrollMode::Fixed && self.cursor.y >= self.height {
                                             info!("{}: Ignoring output past end of viewable area", self.id)
                                         } else {
@@ -522,9 +523,7 @@ impl Pane {
 
         self.lines.iter_mut().for_each(|line| {
             if line.dirty() {
-                // if !line.empty() {
-                    info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
-                // }
+                info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
                 line.write(x_off, y_off + line_idx, width, &ps, target).unwrap();
             }
             line_idx += 1;
