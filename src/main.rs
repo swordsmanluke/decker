@@ -1,4 +1,4 @@
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::sync::mpsc::channel;
 use std::io::{Read, Write, stdout};
 use log::info;
 use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
