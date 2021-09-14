@@ -521,10 +521,10 @@ impl Pane {
         let pane_id = self.id.as_str();
 
         self.lines.iter_mut().for_each(|line| {
-            if line.dirty() || line.empty() {
-                if !line.empty() {
+            if line.dirty() {
+                // if !line.empty() {
                     info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
-                }
+                // }
                 line.write(x_off, y_off + line_idx, width, &ps, target).unwrap();
             }
             line_idx += 1;

@@ -9,7 +9,8 @@ use std::fmt::{Debug, Formatter};
 #[derive(Clone)]
 pub struct GlyphString {
     glyphs: Vec<Glyph>,
-    string_rep: String
+    string_rep: String,
+    dirty: bool
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -45,26 +46,17 @@ impl GlyphString {
     pub fn new() -> GlyphString {
         GlyphString {
             glyphs: Vec::new(),
-            string_rep: String::new()
+            string_rep: String::new(),
+            dirty: true
         }
     }
 
     pub fn dirty(&self) -> bool {
-        self.glyphs.iter().any(|g| g.dirty)
-    }
-
-    pub fn empty(&self) -> bool {
-        // Short lines are probably blanks
-        // otherwise, if all the glyphs are spaces, we're empty.
-        self.string_rep.is_empty() ||
-            self.glyphs.iter().all(|g| g.c == ' ')
+        self.dirty || self.glyphs.iter().any(|g| g.dirty)
     }
 
     pub fn make_dirty(&mut self) {
-        match self.glyphs.get_mut(0) {
-            None => {}
-            Some(g) => { g.dirty = true; }
-        }
+        self.dirty = true
     }
 
     pub fn set(&mut self, index: usize, c: char, style: &PrintStyle) {
@@ -142,6 +134,7 @@ impl GlyphString {
         };
 
         write!(target, "{0: <1$}", output, pad_width)?;
+        self.dirty = false;
 
         Ok(())
     }
