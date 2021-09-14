@@ -152,9 +152,13 @@ impl ProcessOrchestrator {
                         //       and reuse? Or replace them every time?
                         self.proc_io_channels.insert(task_id.to_string(), (new_kid.input_tx(), out_rx));
                         self.proc_command_channels.insert(task_id.to_string(), (status_tx, status_rx));
+                        let run_interactively = match self.active_proc.clone() {
+                            None => { false }
+                            Some(active_task) => { task_id == active_task }
+                        };
 
                         thread::spawn( move || {
-                            new_kid.run().unwrap();
+                            new_kid.run(run_interactively).unwrap();
                         });
                     }
                 }

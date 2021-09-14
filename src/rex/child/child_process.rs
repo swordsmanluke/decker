@@ -3,6 +3,7 @@ use std::sync::mpsc::{Sender, channel, TryRecvError};
 use std::io::{Read, Write};
 use log::info;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, PtyPair};
+use std::time::Duration;
 
 impl ChildProcess {
     pub fn new(command: &str, path: &str, out_tx: Sender<String>, status_tx: Sender<String>, size: (u16,u16)) -> ChildProcess {
@@ -28,7 +29,7 @@ impl ChildProcess {
     /***
     Launches the child's process and runs until the process exits
     ***/
-    pub fn run(&mut self) -> anyhow::Result<()> {
+    pub fn run(&mut self, interactive: bool) -> anyhow::Result<()> {
         info!("Running {}", self.command);
         let mut child = self.launch()?;
 
@@ -41,17 +42,19 @@ impl ChildProcess {
             info!("Exited {} output loop!", command)
         });
 
-        loop {
-            let pid = child.master.process_group_leader();
-            if pid.is_none() {
-                info!("process exited - leaving");
-                break;
-            }
+        if interactive {
+            loop {
+                let pid = child.master.process_group_leader();
+                if pid.is_none() {
+                    info!("{}: process exited - leaving", self.command);
+                    break;
+                }
 
-            // Consume input
-            while let Ok(input) = self.input_receiver.recv() {
-                write!(child.master, "{}", input)?;
-                child.master.flush()?;
+                // Consume input
+                while let Ok(input) = self.input_receiver.recv_timeout(Duration::new(0, 500)) {
+                    write!(child.master, "{}", input)?;
+                    child.master.flush()?;
+                }
             }
         }
 
