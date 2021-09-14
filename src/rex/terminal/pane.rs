@@ -525,7 +525,7 @@ impl Pane {
                 if !line.empty() {
                     info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
                 }
-                line.write(x_off, y_off + line_idx, width, ps, target).unwrap();
+                line.write(x_off, y_off + line_idx, width, &ps, target).unwrap();
             }
             line_idx += 1;
         });

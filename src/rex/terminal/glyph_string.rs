@@ -9,6 +9,7 @@ use std::fmt::{Debug, Formatter};
 #[derive(Clone)]
 pub struct GlyphString {
     glyphs: Vec<Glyph>,
+    string_rep: String
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -43,7 +44,8 @@ impl Debug for GlyphString {
 impl GlyphString {
     pub fn new() -> GlyphString {
         GlyphString {
-            glyphs: Vec::new()
+            glyphs: Vec::new(),
+            string_rep: String::new()
         }
     }
 
@@ -54,7 +56,7 @@ impl GlyphString {
     pub fn empty(&self) -> bool {
         // Short lines are probably blanks
         // otherwise, if all the glyphs are spaces, we're empty.
-        self.glyphs.len() < 2 ||
+        self.string_rep.is_empty() ||
             self.glyphs.iter().all(|g| g.c == ' ')
     }
 
@@ -73,6 +75,7 @@ impl GlyphString {
         }
 
         self.glyphs[index] = Glyph::new(c, style.clone());
+        self.build_string_rep()
     }
 
     pub fn push(&mut self, s: &str, style: &PrintStyle) {
@@ -85,30 +88,24 @@ impl GlyphString {
 
     pub fn clear_to(&mut self, idx: usize) {
         for i in 0..idx {
-            match self.glyphs.get_mut(i) {
-                None => {}
-                Some(g) => {
-                    g.c = ' ';
-                    g.style = PrintStyle::default();
-                }
-            }
+            self.set(i, ' ', &PrintStyle::default());
         }
     }
 
     pub fn clear_at(&mut self, idx: usize) {
-        let g = self.glyphs.get_mut(idx).unwrap();
-        g.c = ' ';
-        g.style = PrintStyle::default();
+        self.set(idx, ' ', &PrintStyle::default());
     }
 
     pub fn delete_to(&mut self, idx: usize) {
         let start = min(self.len(), idx);
         self.glyphs = self.glyphs[start..self.len()].to_owned();
+        self.build_string_rep();
     }
 
     pub fn delete_at(&mut self, idx: usize) {
         if idx < self.len() {
             self.glyphs.remove(idx);
+            self.build_string_rep();
         }
     }
 
@@ -120,17 +117,40 @@ impl GlyphString {
 
     pub fn clear(&mut self) {
         self.glyphs.clear();
+        self.build_string_rep();
     }
 
-    pub fn write(&mut self, x_offset: u16, y_offset: u16, width: u16, style: PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
-        // goto the offset for our line
+    pub fn write(&mut self, x_offset: u16, y_offset: u16, width: u16, style: &PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
+        // write our line at the appropriate offset, style and size!
+        let line_style = style.diff_str(&self.glyphs.first().unwrap_or(&Glyph::default()).style);
+        let reset_style = self.glyphs.last().unwrap_or(&Glyph::default()).style.diff_str(style);
+
+        let set_cursor = format!("\x1b[{};{}H", y_offset, x_offset);
+        let mut output = format!("{}{}{}{}",
+                                 set_cursor,
+                                 line_style,
+                                 self.string_rep,
+                                 reset_style);
+
+        let mut pad_width = if self.len() < width as usize {
+            // Have to pad using the formatted output string length, 'cause the writer doesn't handle
+            // VT100 sequences.
+            let extra_padding_reqd = width - self.len() as u16;
+            output.len() + extra_padding_reqd as usize
+        } else {
+            width as usize
+        };
+
+        write!(target, "{0: <1$}", output, pad_width)?;
+
+        Ok(())
+    }
+
+    fn build_string_rep(&mut self) {
         let mut output = String::new();
-        output.push_str(&format!("\x1b[{};{}H", y_offset, x_offset));
+        let mut cur_style = self.glyphs.first().unwrap_or(&Glyph::default()).style.clone(); // No mutating args!
 
-        let mut cur_style = style.clone(); // No mutating args!
-        let visible_width = min(self.len(), width as usize);
-
-        self.glyphs.iter_mut().take(visible_width).for_each(|g| {
+        self.glyphs.iter_mut().for_each(|g| {
             g.dirty = false; // We've printed you now!
 
             // Make sure to keep the correct style for each glyph
@@ -145,22 +165,8 @@ impl GlyphString {
             output.push(g.c);
         });
 
-        // reset to the og style
-        let diff = cur_style.diff_str(&style);
-        if diff.len() > 0 {
-            output.push_str(&diff);
-        }
-
-        let mut pad_width = width as usize;
-        if self.len() < pad_width {
-            // Have to pad the final output string length, 'cause the writer doesn't handle
-            // VT100 sequences.
-            pad_width = output.len() + (pad_width - self.len());
-        }
-
-        write!(target, "{0: <1$}", output, pad_width)?;
-
-        Ok(())
+        self.string_rep = output;
+        self.make_dirty();
     }
 
     pub fn len(&self) -> usize {
@@ -198,7 +204,7 @@ mod tests {
         g.push("a line of text", &ps);
 
         let mut output = Vec::new();
-        g.write(1, 3, 14, ps, &mut output).unwrap();
+        g.write(1, 3, 14, &ps, &mut output).unwrap();
 
         assert_eq!(output, b"\x1b[3;1Ha line of text");
     }
@@ -211,7 +217,7 @@ mod tests {
         g.push("a line of text", &ps);
 
         let mut output = Vec::new();
-        g.write(1, 3, 15, ps, &mut output).unwrap();
+        g.write(1, 3, 15, &ps, &mut output).unwrap();
 
         assert_eq!(output, b"\x1b[3;1Ha line of text ");
     }
@@ -229,7 +235,7 @@ mod tests {
         g.push(" of text", &ps);
 
         let mut output = Vec::new();
-        g.write(1, 3, 14, ps, &mut output).unwrap();
+        g.write(1, 3, 14, &ps, &mut output).unwrap();
 
         assert_eq!(std::str::from_utf8(&output).unwrap(), "\x1b[3;1H\x1b[32ma line\x1b[37m of text");
     }
