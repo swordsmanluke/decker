@@ -14,13 +14,13 @@ pub struct GlyphString {
 #[derive(Copy, Clone, Debug)]
 struct Glyph {
     pub c: char,
-    pub state: PrintStyle,
-    pub dirty: bool
+    pub style: PrintStyle,
+    pub dirty: bool,
 }
 
 impl Glyph {
     pub fn new(c: char, state: PrintStyle) -> Self {
-        Glyph { c, state, dirty: true }
+        Glyph { c, style: state, dirty: true }
     }
 }
 
@@ -59,7 +59,7 @@ impl GlyphString {
     }
 
     pub fn make_dirty(&mut self) {
-        match self.glyphs.get_mut(0){
+        match self.glyphs.get_mut(0) {
             None => {}
             Some(g) => { g.dirty = true; }
         }
@@ -67,9 +67,9 @@ impl GlyphString {
 
     pub fn set(&mut self, index: usize, c: char, style: &PrintStyle) {
         let extra_chars_reqd = max(0, index as i32 - (self.glyphs.len() as i32 - 1));
-        let default_style = self.glyphs.last().unwrap_or(&Glyph::default()).state;
+        let default_style = self.glyphs.last().unwrap_or(&Glyph::default()).style;
         for _ in 0..extra_chars_reqd {
-            self.glyphs.push(Glyph::new(' ', default_style));
+            self.glyphs.push(Glyph::new(' ', default_style.clone()));
         }
 
         self.glyphs[index] = Glyph::new(c, style.clone());
@@ -87,13 +87,18 @@ impl GlyphString {
         for i in 0..idx {
             match self.glyphs.get_mut(i) {
                 None => {}
-                Some(g) => {g.c = ' '}
+                Some(g) => {
+                    g.c = ' ';
+                    g.style = PrintStyle::default();
+                }
             }
         }
     }
 
     pub fn clear_at(&mut self, idx: usize) {
-        self.glyphs.get_mut(idx).unwrap().c = ' '
+        let g = self.glyphs.get_mut(idx).unwrap();
+        g.c = ' ';
+        g.style = PrintStyle::default();
     }
 
     pub fn delete_to(&mut self, idx: usize) {
@@ -129,11 +134,11 @@ impl GlyphString {
             g.dirty = false; // We've printed you now!
 
             // Make sure to keep the correct style for each glyph
-            let diff = cur_style.diff_str(&g.state);
+            let diff = cur_style.diff_str(&g.style);
 
             if diff.len() > 0 {
-                debug!("Updating style. FG/BG: {}/{} Str: {}", g.state.foreground, g.state.background, g.c);
-                cur_style = g.state;
+                debug!("Updating style. FG/BG: {}/{} Str: {}", g.style.foreground, g.style.background, g.c);
+                cur_style = g.style;
                 output.push_str(&diff);
             }
 
@@ -162,10 +167,6 @@ impl GlyphString {
         self.glyphs.len()
     }
 
-    pub fn raw_len(&self) -> usize {
-        self.glyphs.len()
-    }
-
     pub fn plaintext(&self) -> String {
         self.glyphs.iter().map(|g| g.c.to_string()).collect::<Vec<String>>().join("")
     }
@@ -174,9 +175,9 @@ impl GlyphString {
         let mut current_state = *current_state;
         let mut s = String::new();
         for g in &self.glyphs {
-            if g.state != current_state {
-                s += &g.state.to_str();
-                current_state = g.state.clone();
+            if g.style != current_state {
+                s += &g.style.to_str();
+                current_state = g.style.clone();
             }
             s.push(g.c);
         }
@@ -188,20 +189,6 @@ impl GlyphString {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /***
-    GlyphString tests
-     */
-
-    #[test]
-    fn it_respects_non_printable_chars_when_reporting_length() {
-        let mut g = GlyphString::new();
-        let ps = PrintStyle::default();
-
-        g.push("\u{f}pi\u{f}:~/\u{f} $", &ps);
-        println!("{:?}", g.plaintext());
-        assert_eq!(g.raw_len(), 10);
-        assert_eq!(g.len(), 6)
-    }
 
     #[test]
     fn it_writes_lines_at_offset() {
