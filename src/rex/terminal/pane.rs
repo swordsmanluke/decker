@@ -1,4 +1,4 @@
-use crate::rex::terminal::glyph_string::{GlyphString, Glyph};
+use crate::rex::terminal::glyph_string::GlyphString;
 use regex::Regex;
 use crate::rex::terminal::internal::StreamState;
 use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
@@ -400,7 +400,7 @@ impl Pane {
                                 let vert_line = self.cursor.y - 1;
                                 let line = self.lines.get_mut(vert_line as usize).unwrap();
                                 for _ in 0..4 {
-                                    line.set((self.cursor.x - 1) as usize, Glyph::new(' ', self.print_state));
+                                    line.set((self.cursor.x - 1) as usize, ' ', &self.print_state);
                                     self.cursor.incr_x(1);
                                 }
                             }
@@ -414,7 +414,7 @@ impl Pane {
                                 } else {
                                     let vert_line = self.cursor.y - 1;
                                     let line = self.lines.get_mut(vert_line as usize).unwrap();
-                                    line.set((self.cursor.x - 1) as usize, Glyph::new(c, self.print_state));
+                                    line.set((self.cursor.x - 1) as usize, c, &self.print_state);
                                     self.cursor.incr_x(1);
                                 }
                             }
