@@ -4,23 +4,13 @@ use log::info;
 use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::IntoRawMode;
+use std::thread;
 use crate::rex::{MasterControl, TaskId};
 use crate::rex::terminal::pane::{Pane, ScrollMode};
 use crate::rex::terminal::PaneManager;
 use crate::rex::config::load_task_config;
 
 mod rex;
-
-/***
-A non-blocking read that's ok with an empty buffer
- ***/
-fn read_output<T>(rx: &mut Receiver<T>) -> anyhow::Result<Option<T>> {
-    match rx.try_recv() {
-        Ok(s) => Ok(Some(s)),
-        Err(TryRecvError::Empty) => Ok(None),
-        Err(e) => Err(e.into())
-    }
-}
 
 fn run() -> anyhow::Result<()> {
     init_logging()?;
@@ -63,26 +53,26 @@ fn run() -> anyhow::Result<()> {
 
     println!("\x1b[2J"); // clear screen before we begin
 
+    thread::spawn(move ||{
+        // read stdout and display it
+        loop {
+            if let Ok(pout) = output_rx.recv() {
+                pane_manager.push(pout.name, &pout.output);
+                pane_manager.write(&mut stdout).unwrap();
+                stdout.flush().unwrap();
+            }
+        }});
+
     loop {
         // read stdin and forward it to the active proc.
-        stdin.read_to_string(&mut input)?;
+        stdin.read_to_string(&mut input).unwrap();
         if !input.is_empty() {
             info!("Sending input: {:?}", input);
-            input_tx.send(input.clone())?;
+            input_tx.send(input.clone()).unwrap();
             input.clear();
         }
-
-        // read stdout and display it
-        let output = read_output(&mut output_rx)?;
-        match output {
-            Some(pout) => {
-                pane_manager.push(pout.name, &pout.output);
-                pane_manager.write(&mut stdout)?;
-                stdout.flush()?;
-            }
-            None => {}
-        }
     }
+
     // uncomment after making an exit function
     // Ok(())
 }

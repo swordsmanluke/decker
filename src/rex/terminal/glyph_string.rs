@@ -15,18 +15,12 @@ pub struct GlyphString {
 struct Glyph {
     pub c: char,
     pub state: PrintStyle,
-    pub dirty: bool,
-    fill: bool
+    pub dirty: bool
 }
 
 impl Glyph {
     pub fn new(c: char, state: PrintStyle) -> Self {
-        let fill = (0x20_u8..0x7E_u8).contains(&(c as u8));
-        Glyph { c, state, fill, dirty: true }
-    }
-
-    pub fn is_fill(&self) -> bool {
-        self.fill
+        Glyph { c, state, dirty: true }
     }
 }
 
@@ -98,26 +92,6 @@ impl GlyphString {
         }
     }
 
-    fn visible_idx(&self, idx: usize) -> usize {
-        let mut i = 0;
-        let mut j = 0;
-        loop {
-            let visible = match self.glyphs.get(j) { None => true, Some(g) => g.is_fill() };
-            if visible { i += 1; }
-            println!("j: {}, i: {} Vis: {}", j, i, visible);
-            if i > idx { break; }
-            j += 1;
-        }
-
-        println!("Mapping {}->{}", idx, j);
-        j
-    }
-
-    fn get(&mut self, idx: usize) -> Option<&mut Glyph> {
-        let idx = self.visible_idx(idx);
-        self.glyphs.get_mut(idx)
-    }
-
     pub fn clear_at(&mut self, idx: usize) {
         self.glyphs.get_mut(idx).unwrap().c = ' '
     }
@@ -185,8 +159,7 @@ impl GlyphString {
     }
 
     pub fn len(&self) -> usize {
-        // TODO: Cache
-        self.glyphs.iter().filter(|g| g.is_fill()).count()
+        self.glyphs.len()
     }
 
     pub fn raw_len(&self) -> usize {
@@ -228,30 +201,6 @@ mod tests {
         println!("{:?}", g.plaintext());
         assert_eq!(g.raw_len(), 10);
         assert_eq!(g.len(), 6)
-    }
-
-    #[test]
-    fn it_calculates_offsets_for_non_visible_chars() {
-        let mut g = GlyphString::new();
-        let ps = PrintStyle::default();
-
-        g.push("\u{f}pi\u{f}:~/\u{f} $", &ps);
-
-        let idxes = (0..g.len()).map(|i| g.visible_idx(i)).collect::<Vec<_>>();
-
-        assert_eq!(idxes, vec![1,2,4,6,8,9]);
-    }
-
-    #[test]
-    fn it_respects_non_printable_chars_when_indexing() {
-        let mut g = GlyphString::new();
-        let ps = PrintStyle::default();
-
-        g.push("\u{f}pi\u{f}:~/\u{f} $", &ps);
-
-        assert_eq!(g.get(0).unwrap().c, 'p');
-        assert_eq!(g.get(1).unwrap().c, 'i');
-        assert_eq!(g.get(5).unwrap().c, '$');
     }
 
     #[test]
@@ -323,18 +272,6 @@ mod tests {
     }
 
     #[test]
-    fn it_clears_following_chars() {
-        let mut g = GlyphString::new();
-        let ps = PrintStyle::default();
-
-        g.push("a line of text", &ps);
-
-        g.clear_after(6);
-
-        assert_eq!(g.to_str(&ps), "a line        ");
-    }
-
-    #[test]
     fn it_clears_all_chars() {
         let mut g = GlyphString::new();
         let ps = PrintStyle::default();
@@ -346,30 +283,15 @@ mod tests {
         assert_eq!(g.to_str(&ps), "");
     }
 
-    /***
-    Glyph tests
-     */
     #[test]
-    fn it_recognizes_non_fill_chars() {
-        let g = Glyph::new('\x0F', PrintStyle::default());
-        assert_eq!(g.fill, false)
-    }
+    fn it_clears_following_chars() {
+        let mut g = GlyphString::new();
+        let ps = PrintStyle::default();
 
-    #[test]
-    fn it_recognizes_esc_as_a_non_fill_char() {
-        let g = Glyph::new('\x1B', PrintStyle::default());
-        assert_eq!(g.fill, false)
-    }
+        g.push("a line of text", &ps);
 
-    #[test]
-    fn it_recognizes_fill_chars() {
-        let g = Glyph::new(' ', PrintStyle::default());
-        assert_eq!(g.fill, true)
-    }
+        g.clear_after(6);
 
-    #[test]
-    fn it_recognizes_alhpa_fill_chars() {
-        let g = Glyph::new('a', PrintStyle::default());
-        assert_eq!(g.fill, true)
+        assert_eq!(g.to_str(&ps), "a line        ");
     }
 }

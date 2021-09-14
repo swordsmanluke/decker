@@ -359,6 +359,10 @@ impl Pane {
         for out in self.stream_state.consume() {
             match out {
                 Plaintext(plain) => {
+                    if plain.contains("\x1B") {
+                        info!("{}: plaintext contains ESC! {:?}", self.id, plain);
+                    }
+
                     for c in plain.chars() {
                         match c {
                             '\u{8}' => {
