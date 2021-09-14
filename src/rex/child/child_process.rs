@@ -1,5 +1,5 @@
 use crate::rex::child::ChildProcess;
-use std::sync::mpsc::{Receiver, Sender, channel, TryRecvError};
+use std::sync::mpsc::{Sender, channel, TryRecvError};
 use std::io::{Read, Write};
 use log::info;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, PtyPair};
@@ -10,19 +10,12 @@ impl ChildProcess {
         ChildProcess {
             command: command.to_owned(),
             path: path.to_owned(),
-            shutdown: false,
             input_receiver: in_rx,
             input_sender: in_tx,
             output_sender: out_tx,
             status_sender: status_tx,
             size: size
         }
-    }
-
-    pub fn shutdown(&mut self) -> anyhow::Result<()> {
-        self.status_sender.send("shutdown".to_owned())?;
-        self.shutdown = true;
-        Ok(())
     }
 
     /***
@@ -39,50 +32,45 @@ impl ChildProcess {
         info!("Running {}", self.command);
         let mut child = self.launch()?;
 
-        // forward output
         let mut reader = child.master.try_clone_reader()?;
         let sender = self.output_sender.clone();
-        let (stop_tx, stop_rx) = channel();
         let command = self.command.clone();
 
-        let out_loop = std::thread::spawn( move || {
-            let mut output = [0u8; 1024];
-            let mut first_out = true;
-            while let Err(TryRecvError::Empty) = stop_rx.try_recv() {
-                let size = reader.read(&mut output).unwrap_or(0);
-                if size > 0 {
-                    if first_out {
-                        sender.send(String::from("\x1b[2J")); // Clear the screen when we launch
-                        first_out = false
-                    }
-                    sender.send(String::from_utf8(output[..size].to_owned()).unwrap()).unwrap();
-                }
-            };
+        std::thread::spawn( move || {
+            ChildProcess::forward_output(reader, sender);
             info!("Exited {} output loop!", command)
         });
 
         loop {
-            if self.shutdown {
-                info!("received shutdown sequence - exiting input loop");
-                stop_tx.send("staaahp")?;
-                // FIXME: Apparently I can't use '?' here because the type isn't sized. But unwrap is fine?
-                out_loop.join().unwrap();
-                break;
-            }
-
             let pid = child.master.process_group_leader();
             if pid.is_none() {
-                info!("received shutdown sequence - leaving");
+                info!("process exited - leaving");
                 break;
             }
 
             // Consume input
-            let input = self.read_input()?;
-            write!(child.master, "{}", input)?;
-            child.master.flush()?;
+            while let Ok(input) = self.input_receiver.recv() {
+                write!(child.master, "{}", input)?;
+                child.master.flush()?;
+            }
         }
 
         Ok(())
+    }
+
+    fn forward_output(mut reader: Box<dyn Read + Send>, sender: Sender<String>) -> anyhow::Result<()>{
+        let mut output = [0u8; 1024];
+        let mut first_out = true;
+        loop {
+            let size = reader.read(&mut output)?;
+            if size > 0 {
+                let prefix = if first_out { "\x1b[2J" } else { "" };
+                let child_output = String::from_utf8(output[..size].to_owned())?;
+                if first_out { first_out = false }
+
+                sender.send(format!("{}{}", prefix, child_output))?;
+            }
+        }
     }
 
     /***

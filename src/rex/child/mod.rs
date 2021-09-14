@@ -9,7 +9,6 @@ use std::sync::mpsc::{Receiver, Sender};
 pub struct ChildProcess {
     command: String,
     path: String,
-    shutdown: bool,
     input_receiver: Receiver<String>,
     input_sender: Sender<String>,
     pub output_sender: Sender<String>,
