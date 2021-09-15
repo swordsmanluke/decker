@@ -94,13 +94,6 @@ impl GlyphString {
         self.build_string_rep();
     }
 
-    pub fn delete_at(&mut self, idx: usize) {
-        if idx < self.len() {
-            self.glyphs.remove(idx);
-            self.build_string_rep();
-        }
-    }
-
     pub fn clear_after(&mut self, idx: usize) {
         for i in idx..self.len() {
             self.clear_at(i);
@@ -118,13 +111,13 @@ impl GlyphString {
         let reset_style = self.glyphs.last().unwrap_or(&Glyph::default()).style.diff_str(style);
 
         let set_cursor = format!("\x1b[{};{}H", y_offset, x_offset);
-        let mut output = format!("{}{}{}{}",
+        let output = format!("{}{}{}{}",
                                  set_cursor,
                                  line_style,
                                  self.string_rep,
                                  reset_style);
 
-        let mut pad_width = if self.len() < width as usize {
+        let pad_width = if self.len() < width as usize {
             // Have to pad using the formatted output string length, 'cause the writer doesn't handle
             // VT100 sequences.
             let extra_padding_reqd = width - self.len() as u16;

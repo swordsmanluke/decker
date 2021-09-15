@@ -2,8 +2,14 @@ use crate::rex::child::ChildProcess;
 use std::sync::mpsc::{Sender, channel, TryRecvError};
 use std::io::{Read, Write};
 use log::info;
-use portable_pty::{CommandBuilder, PtySize, native_pty_system, PtyPair};
+use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, MasterPty, SlavePty};
 use std::time::Duration;
+
+struct PtyProcess {
+    master: Box<dyn MasterPty + Send>,
+    slave: Box<dyn SlavePty + Send>,
+    process: Box<dyn Child + Send>
+}
 
 impl ChildProcess {
     pub fn new(command: &str, path: &str, out_tx: Sender<String>, status_tx: Sender<String>, size: (u16,u16)) -> ChildProcess {
@@ -15,7 +21,8 @@ impl ChildProcess {
             input_sender: in_tx,
             output_sender: out_tx,
             status_sender: status_tx,
-            size: size
+            size: size,
+            process: None
         }
     }
 
@@ -31,63 +38,58 @@ impl ChildProcess {
     ***/
     pub fn run(&mut self, interactive: bool) -> anyhow::Result<()> {
         info!("Running {}", self.command);
-        let mut child = self.launch()?;
+        let mut child_proc = self.launch()?;
 
-        let mut reader = child.master.try_clone_reader()?;
+        let reader = child_proc.master.try_clone_reader()?;
         let sender = self.output_sender.clone();
         let command = self.command.clone();
+        let mut process = child_proc.process;
 
         std::thread::spawn( move || {
-            ChildProcess::forward_output(reader, sender);
-            info!("Exited {} output loop!", command)
+            ChildProcess::forward_output(reader, sender, command.clone()).unwrap();
+            info!("{}: Exited output loop!", command)
         });
 
-        if interactive {
-            loop {
-                let pid = child.master.process_group_leader();
-                if pid.is_none() {
-                    info!("{}: process exited - leaving", self.command);
-                    break;
-                }
-
-                // Consume input
+        while let None = process.try_wait().unwrap() {
+            // Consume input
+            if interactive {
                 while let Ok(input) = self.input_receiver.recv_timeout(Duration::new(0, 500)) {
-                    write!(child.master, "{}", input)?;
-                    child.master.flush()?;
+                    write!(child_proc.master, "{}", input)?;
+                    child_proc.master.flush()?;
                 }
             }
+        }
+
+        info!("{}: Exited input loop!", self.command.clone());
+        // Send EOF/^D to kill the PTY
+        let bytes_written = child_proc.master.write(&[26, 4])?;
+        child_proc.master.flush()?;
+
+        Ok(())
+    }
+
+    fn forward_output(mut reader: Box<dyn Read + Send>, sender: Sender<String>, cmd: String) -> anyhow::Result<()>{
+        let mut output = [0u8; 1024];
+        let mut first_out = true;
+        loop {
+            let size = reader.read(&mut output)?;
+
+            let prefix = if first_out { "\x1b[2J" } else { "" };
+            let child_output = String::from_utf8(output[..size].to_owned())?;
+            if first_out { first_out = false }
+
+            // Exit code?
+            if output[size-2] == 94 && output[size-1] == 90 {
+                break;
+            };
+
+            sender.send(format!("{}{}", prefix, child_output))?;
         }
 
         Ok(())
     }
 
-    fn forward_output(mut reader: Box<dyn Read + Send>, sender: Sender<String>) -> anyhow::Result<()>{
-        let mut output = [0u8; 1024];
-        let mut first_out = true;
-        loop {
-            let size = reader.read(&mut output)?;
-            if size > 0 {
-                let prefix = if first_out { "\x1b[2J" } else { "" };
-                let child_output = String::from_utf8(output[..size].to_owned())?;
-                if first_out { first_out = false }
-
-                sender.send(format!("{}{}", prefix, child_output))?;
-            }
-        }
-    }
-
-    /***
-    A non-blocking read that's ok with an empty buffer
-     ***/
-    fn read_input(&mut self) -> anyhow::Result<String> {
-        match self.input_receiver.try_recv() {
-            Ok(s) => { Ok(s) },
-            Err(TryRecvError::Empty) => Ok(String::new()),
-            Err(e) => Err(e.into())
-        }
-    }
-
-    fn launch(&self) -> anyhow::Result<PtyPair> {
+    fn launch(&self) -> anyhow::Result<PtyProcess> {
         let pty_sys = native_pty_system();
         let pair = pty_sys.openpty(PtySize {
             rows: self.size.0,
@@ -109,7 +111,12 @@ impl ChildProcess {
         cmd.cwd(self.path.clone());
         if args.len() > 0 { cmd.args(args); }
 
-        pair.slave.spawn_command(cmd)?;
-        Ok(pair)
+        let child = pair.slave.spawn_command(cmd)?;
+        let process = PtyProcess {
+            master: pair.master,
+            slave: pair.slave,
+            process: child
+        };
+        Ok(process)
     }
 }

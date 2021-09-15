@@ -5,6 +5,7 @@
 mod child_process;
 
 use std::sync::mpsc::{Receiver, Sender};
+use portable_pty::Child;
 
 pub struct ChildProcess {
     command: String,
@@ -13,5 +14,6 @@ pub struct ChildProcess {
     input_sender: Sender<String>,
     pub output_sender: Sender<String>,
     pub status_sender: Sender<String>,
-    size: (u16,u16)
+    size: (u16,u16),
+    process: Option<Box<dyn Child + Send>>
 }

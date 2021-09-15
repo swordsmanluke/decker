@@ -66,6 +66,7 @@ impl ProcessOrchestrator {
                     Some(proc_name) => {
                         // Forward these bytes to the active process
                         let (tx, _) = self.proc_io_channels.get_mut(proc_name.as_str()).unwrap();
+                        // TODO: Handle tx.send returns an Err due to closed channel
                         tx.send(input.clone())?;
                     }
                     None => {info!("No active task. Ignoring!");}
