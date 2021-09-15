@@ -3,7 +3,7 @@ use regex::{Regex};
 use std::cmp::{max, min};
 use crate::rex::terminal::pane::PrintStyle;
 use std::io::Write;
-use log::{debug, info};
+use log::{debug};
 use std::fmt::{Debug, Formatter};
 
 #[derive(Clone)]

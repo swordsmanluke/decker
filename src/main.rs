@@ -1,6 +1,6 @@
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, SendError};
 use std::io::{Read, Write, stdout};
-use log::info;
+use log::{ info, error };
 use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::IntoRawMode;
@@ -68,13 +68,15 @@ fn run() -> anyhow::Result<()> {
         stdin.read_to_string(&mut input).unwrap();
         if !input.is_empty() {
             info!("Sending input: {:?}", input);
-            input_tx.send(input.clone()).unwrap();
+            match input_tx.send(input.clone()) {
+                Ok(_) => {}
+                Err(err) => { error!("{}", err); break;}
+            }
             input.clear();
         }
     }
 
-    // uncomment after making an exit function
-    // Ok(())
+    Ok(())
 }
 
 fn init_logging() -> anyhow::Result<()> {
@@ -94,7 +96,9 @@ fn main() {
     // Input Thread: Forward stdin to the child's Input channel
     // Output Thread: Forward stdout from the child to the Output channel
     match run() {
-        Ok(_) => { println!("{}", "Shutdown!") },
-        Err(err) => { println!("{:?}", err)}
+        Ok(_) => {},
+        Err(err) => { error!("{:?}", err); }
     }
+
+    println!("{}", "Shutdown!");
 }

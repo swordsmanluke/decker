@@ -1,8 +1,8 @@
 use crate::rex::child::ChildProcess;
-use std::sync::mpsc::{Sender, channel, TryRecvError};
+use std::sync::mpsc::{Sender, channel};
 use std::io::{Read, Write};
-use log::info;
-use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, MasterPty, SlavePty};
+use log::{info, error};
+use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, MasterPty, SlavePty };
 use std::time::Duration;
 
 struct PtyProcess {
@@ -46,29 +46,72 @@ impl ChildProcess {
         let mut process = child_proc.process;
 
         std::thread::spawn( move || {
-            ChildProcess::forward_output(reader, sender, command.clone()).unwrap();
+            if interactive {
+                info!("{}: Running interactively", command.clone());
+                match ChildProcess::forward_output(reader, sender) {
+                    Ok(_) => {}
+                    Err(e) => { error!("{:?}", e)}
+                }
+            } else {
+                info!("{}: Running non-interactively", command.clone());
+                match ChildProcess::capture_output(reader, sender, command.clone()) {
+                    Ok(_) => {}
+                    Err(e) => { error!("{:?}", e)}
+                }
+            }
             info!("{}: Exited output loop!", command)
         });
 
-        while let None = process.try_wait().unwrap() {
-            // Consume input
-            if interactive {
+        if interactive {
+            while let None = process.try_wait().unwrap() {
+                // Consume input
+
                 while let Ok(input) = self.input_receiver.recv_timeout(Duration::new(0, 500)) {
                     write!(child_proc.master, "{}", input)?;
                     child_proc.master.flush()?;
                 }
             }
+        } else {
+            match process.wait() {
+                Ok(_) => {}
+                Err(e) => { error!("{}", e) }
+            }
         }
 
         info!("{}: Exited input loop!", self.command.clone());
         // Send EOF/^D to kill the PTY
-        let bytes_written = child_proc.master.write(&[26, 4])?;
+        child_proc.master.write(&[26, 4])?;
         child_proc.master.flush()?;
 
         Ok(())
     }
 
-    fn forward_output(mut reader: Box<dyn Read + Send>, sender: Sender<String>, cmd: String) -> anyhow::Result<()>{
+    fn capture_output(mut reader: Box<dyn Read + Send>, sender: Sender<String>, cmd: String) -> anyhow::Result<()> {
+        let mut buffer = [0u8; 1024];
+        let mut output = String::new();
+        info!("{}: Reading from reader to string", cmd);
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(size) => {
+                    // Exit code?
+                    if buffer[size-2] == 94 && buffer[size-1] == 90 {
+                        break;
+                    };
+                    output += &String::from_utf8(buffer[..size].to_owned())?;
+                }
+                Err(e) => { error!("{}: Error reading from proc: {}", cmd, e); break; }
+            }
+        }
+
+        info!("{}: Read output {}", cmd, output);
+
+        let prefix = String::from("\x1b[2J");
+        sender.send(format!("{}{}", prefix, output)).unwrap();
+
+        Ok(())
+    }
+
+    fn forward_output(mut reader: Box<dyn Read + Send>, sender: Sender<String>) -> anyhow::Result<()>{
         let mut output = [0u8; 1024];
         let mut first_out = true;
         loop {
