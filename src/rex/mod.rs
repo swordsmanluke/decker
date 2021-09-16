@@ -20,8 +20,6 @@ pub struct MasterControl {
     // For sending commands/responses to ProcOrc
     proc_orc_cmd_tx: Sender<String>,
     proc_orc_resp_rx: Receiver<String>,
-    // For sending stdin to ProcOrc
-    proc_orc_stdin_tx: Sender<String>
 }
 
 pub type TaskId = String;

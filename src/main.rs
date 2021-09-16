@@ -5,8 +5,7 @@ use std::fs::File;
 use termion::raw::IntoRawMode;
 use std::thread;
 use crate::rex::{MasterControl, TaskId, ProcessOrchestrator};
-use crate::rex::terminal::pane::{Pane, ScrollMode};
-use crate::rex::terminal::PaneManager;
+use crate::rex::terminal::{Pane, PaneManager, ScrollMode};
 use crate::rex::config::load_task_config;
 use std::time::{SystemTime, Duration};
 use crossbeam_channel::{bounded, unbounded};
@@ -26,18 +25,13 @@ fn run() -> anyhow::Result<()> {
 
     let mut orchestrator = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx);
     let input_tx = orchestrator.input_tx();
-    thread::spawn(move || {
-        match orchestrator.run() {
-            Ok(_) => { info!("main: ProcessOrchestrator stopped"); }
-            Err(e) => { error!("main: ProcessOrchestator crashed: {}", e)}
-        }
-    });
+    start_orchestrator(orchestrator);
 
     info!("main: Creating MCP");
-    let mut mcp = MasterControl::new(cmd_tx, resp_rx, input_tx);
+    let mut mcp = MasterControl::new(cmd_tx, resp_rx);
     let mut pane_manager = PaneManager::new();
 
-    let input_tx = mcp.input_tx();
+    let input_tx = input_tx.clone();
 
     // create panes from cfg
     for p in hex_cfg.panes {
@@ -99,6 +93,15 @@ fn run() -> anyhow::Result<()> {
     info!("main: Exited top-level input forwarding");
 
     Ok(())
+}
+
+fn start_orchestrator(mut orchestrator: ProcessOrchestrator) {
+    thread::spawn(move || {
+        match orchestrator.run() {
+            Ok(_) => { info!("main: ProcessOrchestrator stopped"); }
+            Err(e) => { error!("main: ProcessOrchestator crashed: {}", e) }
+        }
+    });
 }
 
 fn init_logging() -> anyhow::Result<()> {

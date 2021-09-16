@@ -1,4 +1,4 @@
-use crate::rex::terminal::glyph_string::GlyphString;
+use crate::rex::terminal::internal::glyph_string::GlyphString;
 use regex::Regex;
 use crate::rex::terminal::internal::StreamState;
 use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
@@ -8,35 +8,7 @@ use log::{info, error};
 use anyhow::bail;
 use std::fmt::{Display, Formatter};
 use lazy_static::lazy_static;
-
-#[derive(Eq, PartialEq)]
-pub enum ScrollMode {
-    Scroll,
-    Fixed
-}
-
-pub struct Pane {
-    pub id: String,
-    // Location and Dimensions
-    pub x: u16,
-    pub y: u16,
-    pub height: u16,
-    pub width: u16,
-
-    scroll_mode: ScrollMode,
-
-    // Cached lines
-    lines: Vec<GlyphString>,
-
-    // virtual cursor location
-    cursor: Cursor,
-
-    // current print state
-    print_state: PrintStyle,
-
-    // Input buffer
-    stream_state: StreamState,
-}
+use crate::rex::terminal::{ScrollMode, Pane, Cursor};
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum Color {
@@ -67,11 +39,6 @@ pub struct PrintStyle {
     pub blink: bool,
     pub bold: bool,
     pub invert: bool,
-}
-
-struct Cursor {
-    x: u16,
-    y: u16,
 }
 
 impl Cursor {

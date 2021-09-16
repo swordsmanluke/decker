@@ -1,6 +1,7 @@
-use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
+use crate::rex::terminal::internal::TerminalOutput::{CSI, Plaintext};
 
 mod stream_state;
+pub mod glyph_string;
 
 enum VT100State {
     PlainText,

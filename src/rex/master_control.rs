@@ -5,8 +5,8 @@ use std::time::Duration;
 use std::ops::Deref;
 use simple_error::bail;
 use serde::{Serialize, Deserialize};
-use crate::rex::terminal::pane::Pane;
 use crossbeam_channel::{Sender, unbounded, Receiver};
+use crate::rex::terminal::Pane;
 
 pub type PaneSize = Option<(u16, u16)>;
 
@@ -23,19 +23,11 @@ pub struct ResizeTask {
 }
 
 impl MasterControl {
-    pub fn new(cmd_tx: Sender<String>, resp_rx: Receiver<String>, proc_orc_stdin_tx: Sender<String>) -> MasterControl {
+    pub fn new(cmd_tx: Sender<String>, resp_rx: Receiver<String>) -> MasterControl {
         MasterControl {
             proc_orc_cmd_tx: cmd_tx,
             proc_orc_resp_rx: resp_rx,
-            proc_orc_stdin_tx
         }
-    }
-
-    /***
-    Get a Sender<String> clone on which to forward data from stdin
-     */
-    pub fn input_tx(&self) -> Sender<String> {
-        self.proc_orc_stdin_tx.clone()
     }
 
     /***

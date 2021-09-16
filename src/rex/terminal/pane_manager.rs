@@ -1,8 +1,7 @@
 use crate::rex::TaskId;
-use crate::rex::terminal::PaneManager;
+use crate::rex::terminal::{PaneManager, Pane};
 use std::io::Write;
 use log::{info, error};
-use crate::rex::terminal::pane::Pane;
 
 impl PaneManager {
     pub fn new() -> PaneManager {
