@@ -6,7 +6,7 @@ use std::ops::Deref;
 use simple_error::bail;
 use serde::{Serialize, Deserialize};
 use crate::rex::terminal::pane::Pane;
-use crossbeam_channel::{Sender, unbounded};
+use crossbeam_channel::{Sender, unbounded, Receiver};
 
 pub type PaneSize = Option<(u16, u16)>;
 
@@ -23,20 +23,7 @@ pub struct ResizeTask {
 }
 
 impl MasterControl {
-    pub fn new(output_tx: Sender<ProcOutput>) -> MasterControl {
-        let (cmd_tx, cmd_rx) = unbounded();
-        let (resp_tx, resp_rx) = unbounded();
-        let mut orchestrator = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx);
-        let proc_orc_stdin_tx= orchestrator.input_tx();
-
-        thread::spawn(move || {
-            info!("Starting ProcessOrchestrator");
-            match orchestrator.run() {
-                Ok(_) => { info!("ProcessOrchestrator stopped"); }
-                Err(e) => { error!("ProcessOrchestator crashed: {}", e)}
-            }
-        });
-
+    pub fn new(cmd_tx: Sender<String>, resp_rx: Receiver<String>, proc_orc_stdin_tx: Sender<String>) -> MasterControl {
         MasterControl {
             proc_orc_cmd_tx: cmd_tx,
             proc_orc_resp_rx: resp_rx,
@@ -79,7 +66,7 @@ impl MasterControl {
     }
 
     /***
-    Select a child process to forward stdin to 
+    Select a child process to forward stdin to
      */
     pub fn activate_proc(&mut self, task_id: &TaskId, pane: &Pane) -> anyhow::Result<()> {
         // TODO: Finish wiring this up.
@@ -98,13 +85,15 @@ impl MasterControl {
     Execute a task by name
      */
     pub fn execute(&mut self, name: &str) -> anyhow::Result<()> {
-        self.send_command("execute", name)?;
-        self.await_response("execute")?;
+        while let Err(_) = self.await_response("execute") {
+            self.send_command("execute", name)?;
+        }
         Ok(())
     }
 
     fn send_command(&self, command: &str, metadata: &str) -> anyhow::Result<()>{
         let data = format!("{}: {}", command, metadata);
+        info!("MCP Sending command {}", data);
         self.proc_orc_cmd_tx.send(data)?;
         Ok(())
     }

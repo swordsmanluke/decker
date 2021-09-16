@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::rex::master_control::PaneSize;
 use std::time::SystemTime;
 use lazy_static::lazy_static;
+use portable_pty::PtyPair;
 
 pub struct ProcOutput { pub name: String, pub output: String }
 
@@ -70,11 +71,11 @@ impl Task {
     }
 }
 
-//  All of the threaded functionality  lives in the  "real" orchestrator class
-//  and then this should become a facade that communicates with the real class
-//  via channels. Make it simple for us to use the facade from the main thread
-//  without needing mutable references to the backing threads every-damn-where
-struct ProcessOrchestrator {
+//  All of the threaded functionality lives in the process orchestrator class
+//  comms are performed via channels with the MCP. Make it simple for us to
+//  use the facade from the main thread without needing mutable references to
+//  the backing threads every-damn-where
+pub struct ProcessOrchestrator {
     // Track all of our registered tasks
     tasks: HashMap<String, Task>,
     sizes: HashMap<String, PaneSize>,
@@ -92,7 +93,6 @@ struct ProcessOrchestrator {
     input_tx: Sender<String>,
     input_rx: Receiver<String>,
 
-    // Channels for communicating with individual processes
-    active_pty_channel: HashMap::<String, Sender<String>>,
+    main_pty: PtyPair,
     active_proc: Option<String>
 }

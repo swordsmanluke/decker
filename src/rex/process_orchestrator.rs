@@ -6,6 +6,9 @@ use log::{info, error};
 use crate::rex::master_control::{RegisterTask, ResizeTask};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use crossbeam_channel::{Sender, Receiver, TryRecvError, unbounded};
+use portable_pty::PtySize;
+use std::io::{Read, Write};
+use std::process::Command;
 
 impl ProcessOrchestrator {
     /***
@@ -14,7 +17,15 @@ impl ProcessOrchestrator {
      */
     pub fn new(output_tx: Sender<ProcOutput>, cmd_rx: Receiver<String>, resp_tx: Sender<String>) -> ProcessOrchestrator {
         let (input_tx, input_rx) = unbounded();
-        let proc_io_channels = HashMap::<String, Sender<String>>::new();
+        // TODO: Get the actual size in here.
+        let pty = portable_pty::native_pty_system().openpty(PtySize {
+            rows: 80,
+            cols: 18,
+            pixel_width: 0,
+            pixel_height: 0,
+        }).unwrap();
+
+        info!("Created pty");
 
         ProcessOrchestrator {
             tasks: HashMap::new(),
@@ -25,9 +36,9 @@ impl ProcessOrchestrator {
             output_tx,
             input_tx,
             input_rx,
-            active_pty_channel: proc_io_channels,
+            main_pty: pty,
             active_proc: None,
-            shutdown: false
+            shutdown: false,
         }
     }
 
@@ -41,9 +52,12 @@ impl ProcessOrchestrator {
     /***
     Run the processing loop
      */
-    pub fn run(&mut self) -> anyhow::Result<()>{
+    pub fn run(&mut self) -> anyhow::Result<()> {
+        info!("main: Starting ProcessOrchestrator");
+        Self::start_forward_output_loop(self.main_pty.master.try_clone_reader()?, self.output_tx.clone())?;
+        Self::start_forward_input_loop(self.input_rx.clone(), self.main_pty.master.try_clone_writer()?, "main".to_string());
+
         loop {
-            self.forward_input()?;
             self.process_commands()?;
             self.run_periodic_tasks()?;
 
@@ -55,37 +69,10 @@ impl ProcessOrchestrator {
         Ok(())
     }
 
-    fn forward_input(&mut self) -> anyhow::Result<()>{
-
-        let tx= match &self.active_proc {
-            Some(proc_name) => {
-                // Forward these bytes to the active process
-                self.active_pty_channel.get_mut(proc_name.as_str())
-            }
-            None => {info!("No active task. Ignoring!"); None }
-        };
-
-        if tx.is_none() {
-            // Nothing to do, ATM.
-            return Ok(())
-        }
-
-        let tx = tx.unwrap().clone();
-        let input_rx = self.input_rx.clone();
-
-        thread::spawn(move || {
-            while let Ok(input) = input_rx.recv() {
-                // TODO: Update tx?
-                tx.send(input.clone()).unwrap();
-            }
-        });
-
-        Ok(())
-    }
-
-    fn process_commands(&mut self) -> anyhow::Result<()>{
+    fn process_commands(&mut self) -> anyhow::Result<()> {
         match self.command_rx.try_recv() {
             Ok(command) => {
+                info!("Process Orchestrator: Received command {}!", command);
                 let parts = command.split(":").map(|s| s.trim().to_string()).collect::<Vec<String>>();
                 let cmd = parts.first().unwrap(); // command part
                 let data = parts[1..].join(":");
@@ -126,30 +113,90 @@ impl ProcessOrchestrator {
                     Some((width, height)) => {
                         let mut new_kid = ChildProcess::new(task.command.as_str(),
                                                             task.path.as_str(),
-                                                            self.output_tx.clone(),
                                                             (*height, *width));
-
-                        self.active_pty_channel.insert(task_id.to_string(), new_kid.input_tx());
 
                         let run_interactively = match self.active_proc.clone() {
                             None => { false }
                             Some(active_task) => { task_id == active_task }
                         };
 
-                        let pane_id = match self.active_proc.clone() {
-                            None => { task_id }
-                            Some(active_task) => { if active_task == task_id { "main" } else { task_id} }
-                        }.to_string();
+                        let pane_id = if run_interactively { "main" } else { task_id }.to_string();
 
-                        thread::spawn( move || {
-                            new_kid.run(pane_id, run_interactively).unwrap();
-                        });
+                        info!("{}: Running interactively: {}", pane_id, run_interactively);
+
+                        if run_interactively {
+                            self.main_pty.slave.spawn_command(new_kid.command_for_pty()).unwrap();
+                        } else {
+                            let output_tx = self.output_tx.clone();
+                            thread::spawn(move || {
+                                Self::capture_output(output_tx, new_kid, pane_id).unwrap();
+                            });
+                        }
                     }
                 }
             }
         }
 
         Ok(())
+    }
+
+    fn start_forward_output_loop(mut reader: Box<dyn Read + Send>, sender: Sender<ProcOutput>) -> anyhow::Result<()> {
+        thread::spawn(move || {
+            let pane = "main".to_string(); // Always the same name
+            let mut output = [0u8; 1024];
+            loop {
+                info!("main: Reading from output reader");
+                let size = reader.read(&mut output).unwrap_or(0);
+                info!("main: Read {} bytes", size);
+                if size > 0 {
+                    let output = String::from_utf8(output[..size].to_owned()).unwrap();
+                    info!("main: Sending {} to MCP", output);
+                    sender.send(ProcOutput { name: pane.clone(), output }).unwrap();
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    fn capture_output(sender: Sender<ProcOutput>, child: ChildProcess, pane: String) -> anyhow::Result<()> {
+        info!("{}: Running {} non-interactively", pane, child.command);
+
+        let mut cmd_and_args = child.command.split_ascii_whitespace();
+        let command = cmd_and_args.next().unwrap();
+        let args = cmd_and_args.collect::<Vec<_>>();
+
+        let mut cmd = Command::new(command);
+        cmd.current_dir(child.path.clone());
+        if args.len() > 0 { cmd.args(args); }
+
+        let stdout = String::from_utf8(cmd.output()?.stdout)?;
+        let stderr = String::from_utf8(cmd.output()?.stderr)?;
+
+        if !stdout.is_empty() {
+            info!("{}: Sending {}", pane, stdout);
+            sender.send(ProcOutput { name: pane.clone(), output: format!("\x1B[2J{}", stdout) })?;
+        }
+
+        if !stderr.is_empty() {
+            info!("{}: Sending (Err) {}", pane, stderr);
+            sender.send(ProcOutput { name: pane, output: stderr })?;
+        }
+        Ok(())
+    }
+
+    fn start_forward_input_loop(input_rx: Receiver<String>, mut input_tx: Box<dyn Write + Send>, pane: String) {
+        thread::spawn(move || {
+            while let Ok(input) = input_rx.recv() {
+                write!(input_tx, "{}", input).unwrap();
+                input_tx.flush().unwrap();
+            }
+
+            info!("{}: Exited input loop!", pane);
+            // Send EOF/^D to kill the PTY
+            input_tx.write(&[26, 4]).unwrap();
+            input_tx.flush().unwrap();
+        });
     }
 
     /***
@@ -168,10 +215,10 @@ impl ProcessOrchestrator {
         info!("Commanded to {}: {}", command, data);
 
         match match command {
-            "execute"  => { self.execute(data) }
+            "execute" => { self.execute(data) }
             "activate" => { self.activate_proc(data) }
             "register" => { self.register_task(data) }
-            "resize"   => { self.resize_task(data) }
+            "resize" => { self.resize_task(data) }
             _ => {
                 info!("Unsupported command: {}", command);
                 Ok(())
@@ -184,7 +231,7 @@ impl ProcessOrchestrator {
         Ok(())
     }
 
-    fn register_task(&mut self, register_str: &str) -> anyhow::Result<()>{
+    fn register_task(&mut self, register_str: &str) -> anyhow::Result<()> {
         let register: RegisterTask = serde_json::from_str(register_str)?;
         self.sizes.insert(register.task.id.clone(), register.size);
         self.tasks.insert(register.task.id.clone(), register.task);
@@ -192,7 +239,7 @@ impl ProcessOrchestrator {
         Ok(())
     }
 
-    fn resize_task(&mut self, resize_str: &str) -> anyhow::Result<()>{
+    fn resize_task(&mut self, resize_str: &str) -> anyhow::Result<()> {
         let resize: ResizeTask = serde_json::from_str(resize_str)?;
         self.sizes.insert(resize.task_id.clone(), resize.size);
 
@@ -221,12 +268,12 @@ impl ProcessOrchestrator {
 
         Ok(())
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn instance() -> ProcessOrchestrator {
         let (output_tx, _) = unbounded();
         let (_, cmd_rx) = unbounded();

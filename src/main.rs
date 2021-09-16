@@ -4,12 +4,12 @@ use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::IntoRawMode;
 use std::thread;
-use crate::rex::{MasterControl, TaskId};
+use crate::rex::{MasterControl, TaskId, ProcessOrchestrator};
 use crate::rex::terminal::pane::{Pane, ScrollMode};
 use crate::rex::terminal::PaneManager;
 use crate::rex::config::load_task_config;
 use std::time::{SystemTime, Duration};
-use crossbeam_channel::bounded;
+use crossbeam_channel::{bounded, unbounded};
 
 mod rex;
 
@@ -20,8 +20,21 @@ fn run() -> anyhow::Result<()> {
     let mut stdin = termion::async_stdin();
     let mut stdout = stdout().into_raw_mode()?;
 
-    let (output_tx, mut output_rx) = bounded(50); //channel();
-    let mut mcp = MasterControl::new(output_tx);
+    let (output_tx, mut output_rx) = bounded(50); // Output to Screen channel
+    let (cmd_tx, cmd_rx) = unbounded();             // mcp -> POrc communication
+    let (resp_tx, resp_rx) = unbounded();           // POrc -> mcp communication
+
+    let mut orchestrator = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx);
+    let input_tx = orchestrator.input_tx();
+    thread::spawn(move || {
+        match orchestrator.run() {
+            Ok(_) => { info!("main: ProcessOrchestrator stopped"); }
+            Err(e) => { error!("main: ProcessOrchestator crashed: {}", e)}
+        }
+    });
+
+    info!("main: Creating MCP");
+    let mut mcp = MasterControl::new(cmd_tx, resp_rx, input_tx);
     let mut pane_manager = PaneManager::new();
 
     let input_tx = mcp.input_tx();
@@ -54,6 +67,7 @@ fn run() -> anyhow::Result<()> {
     println!("\x1b[2J"); // clear screen before we begin
 
     thread::spawn(move ||{
+        info!("main: Starting Output caputure thread");
         let mut last_printed = SystemTime::UNIX_EPOCH;
         // read stdout and display it
         while let Ok(pout) = output_rx.recv() {
@@ -78,7 +92,6 @@ fn run() -> anyhow::Result<()> {
                 Ok(_) => {}
                 Err(err) => { error!("main: {}", err); break;}
             }
-            // buffer.clear();
         } else {
             thread::sleep(Duration::from_millis(30) );
         }
@@ -106,7 +119,7 @@ fn main() {
     // Output Thread: Forward stdout from the child to the Output channel
     match run() {
         Ok(_) => {},
-        Err(err) => { error!("{:?}", err); }
+        Err(err) => { error!("Fatal error {:?}", err.to_string()); }
     }
 
     println!("\x1B[0m{}", "Shutdown!");
