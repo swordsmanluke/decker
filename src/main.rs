@@ -8,7 +8,7 @@ use crate::rex::{MasterControl, TaskId};
 use crate::rex::terminal::pane::{Pane, ScrollMode};
 use crate::rex::terminal::PaneManager;
 use crate::rex::config::load_task_config;
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 use crossbeam_channel::bounded;
 
 mod rex;
@@ -51,8 +51,6 @@ fn run() -> anyhow::Result<()> {
     mcp.activate_proc(&task_id, pane_manager.find_by_id("main").unwrap())?;
     mcp.execute(&task_id)?;
 
-    let mut input = String::new();
-
     println!("\x1b[2J"); // clear screen before we begin
 
     thread::spawn(move ||{
@@ -71,16 +69,18 @@ fn run() -> anyhow::Result<()> {
         info!("main: Exited top-level output forwarding");
     });
 
+    let mut buffer: [u8; 1] = [0; 1];
     loop {
         // read stdin and forward it to the active proc.
-        stdin.read_to_string(&mut input).unwrap();
-        if !input.is_empty() {
-            info!("Sending input: {:?}", input);
-            match input_tx.send(input.clone()) {
+        if let Ok(_) = stdin.read_exact(&mut buffer[..1]) {
+            info!("main: Sending input: {:?}", buffer);
+            match input_tx.send(String::from(buffer[0] as char)) {
                 Ok(_) => {}
                 Err(err) => { error!("main: {}", err); break;}
             }
-            input.clear();
+            // buffer.clear();
+        } else {
+            thread::sleep(Duration::from_millis(30) );
         }
     }
     info!("main: Exited top-level input forwarding");

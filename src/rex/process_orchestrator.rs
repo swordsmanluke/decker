@@ -2,7 +2,7 @@ use crate::rex::{ProcessOrchestrator, ProcOutput};
 use crate::rex::child::ChildProcess;
 use std::collections::HashMap;
 use std::thread;
-use log::info;
+use log::{info, error};
 use crate::rex::master_control::{RegisterTask, ResizeTask};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use crossbeam_channel::{Sender, Receiver, TryRecvError, unbounded};
@@ -25,7 +25,7 @@ impl ProcessOrchestrator {
             output_tx,
             input_tx,
             input_rx,
-            proc_io_channels,
+            active_pty_channel: proc_io_channels,
             active_proc: None,
             shutdown: false
         }
@@ -56,22 +56,30 @@ impl ProcessOrchestrator {
     }
 
     fn forward_input(&mut self) -> anyhow::Result<()>{
-        match &self.input_rx.try_recv() {
-            Ok(input) => {
-                info!("Received input: {:?}", input);
-                match &self.active_proc {
-                    Some(proc_name) => {
-                        // Forward these bytes to the active process
-                        let tx= self.proc_io_channels.get_mut(proc_name.as_str()).unwrap();
-                        // TODO: Handle tx.send returns an Err due to closed channel
-                        tx.send(input.clone())?;
-                    }
-                    None => {info!("No active task. Ignoring!");}
-                }
+
+        let tx= match &self.active_proc {
+            Some(proc_name) => {
+                // Forward these bytes to the active process
+                self.active_pty_channel.get_mut(proc_name.as_str())
             }
-            Err(TryRecvError::Empty) => {}
-            Err(_) => { /* TODO */ }
+            None => {info!("No active task. Ignoring!"); None }
+        };
+
+        if tx.is_none() {
+            // Nothing to do, ATM.
+            return Ok(())
         }
+
+        let tx = tx.unwrap().clone();
+        let input_rx = self.input_rx.clone();
+
+        thread::spawn(move || {
+            while let Ok(input) = input_rx.recv() {
+                // TODO: Update tx?
+                tx.send(input.clone()).unwrap();
+            }
+        });
+
         Ok(())
     }
 
@@ -121,7 +129,7 @@ impl ProcessOrchestrator {
                                                             self.output_tx.clone(),
                                                             (*height, *width));
 
-                        self.proc_io_channels.insert(task_id.to_string(), new_kid.input_tx());
+                        self.active_pty_channel.insert(task_id.to_string(), new_kid.input_tx());
 
                         let run_interactively = match self.active_proc.clone() {
                             None => { false }

@@ -65,7 +65,6 @@ impl ChildProcess {
         if interactive {
             while let None = process.try_wait().unwrap() {
                 // Consume input
-
                 while let Ok(input) = self.input_receiver.recv_timeout(Duration::new(0, 500)) {
                     write!(child_proc.master, "{}", input)?;
                     child_proc.master.flush()?;

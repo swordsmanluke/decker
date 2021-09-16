@@ -23,6 +23,13 @@ impl TerminalOutput {
             CSI(s) => { s.clone() }
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Plaintext(s) => { s.len() == 0 }
+            CSI(s) => { s.len() == 0 }
+        }
+    }
 }
 
 pub(crate) struct StreamState {

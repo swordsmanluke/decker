@@ -6,7 +6,7 @@ use std::ops::Deref;
 use simple_error::bail;
 use serde::{Serialize, Deserialize};
 use crate::rex::terminal::pane::Pane;
-use crossbeam_channel::{Sender, bounded, unbounded};
+use crossbeam_channel::{Sender, unbounded};
 
 pub type PaneSize = Option<(u16, u16)>;
 

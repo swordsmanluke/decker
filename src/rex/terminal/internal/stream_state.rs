@@ -93,10 +93,7 @@ impl StreamState {
             self.build_state = PlainText;
         }
         // reject any empty strings.
-        let out = self.vetted_output.iter().filter_map(|o| match o {
-            Plaintext(p) => { if p.is_empty() { None } else { Some(o.to_owned()) } }
-            CSI(csi) => { if csi.is_empty() { None } else { Some(o.to_owned()) } }
-        }).collect();
+        let out = self.vetted_output.iter().filter(|o| !o.is_empty()).cloned().collect();
 
         self.vetted_output = Vec::new();
 
