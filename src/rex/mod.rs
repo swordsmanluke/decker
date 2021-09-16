@@ -1,4 +1,4 @@
-use std::sync::mpsc::{Sender, Receiver};
+use crossbeam_channel::{Sender, Receiver};
 use std::collections::HashMap;
 
 

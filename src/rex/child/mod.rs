@@ -4,7 +4,7 @@
 ***/
 mod child_process;
 
-use std::sync::mpsc::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender};
 use portable_pty::Child;
 
 pub struct ChildProcess {

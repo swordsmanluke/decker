@@ -520,14 +520,20 @@ impl Pane {
         let y_off = self.y;
         let width = self.width;
         let pane_id = self.id.as_str();
+        let mut chunks: Vec<u8> = Vec::with_capacity(1024);
 
         self.lines.iter_mut().for_each(|line| {
             if line.dirty() {
                 info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
-                line.write(x_off, y_off + line_idx, width, &ps, target).unwrap();
+                line.write(x_off, y_off + line_idx, width, &ps, &mut chunks).unwrap();
             }
             line_idx += 1;
         });
+
+        if chunks.len() > 0 {
+            info!("Writing {} bytes", chunks.len());
+            write!(target, "{}", String::from_utf8(chunks)?);
+        }
 
         Ok(())
     }

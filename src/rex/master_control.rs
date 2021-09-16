@@ -1,12 +1,13 @@
 use crate::rex::{MasterControl, ProcOutput, ProcessOrchestrator, Task, TaskId};
-use std::sync::mpsc::{Sender, channel};
 use std::thread;
-use log::{info, warn};
+use log::{info, warn, error};
 use std::time::Duration;
 use std::ops::Deref;
 use simple_error::bail;
 use serde::{Serialize, Deserialize};
 use crate::rex::terminal::pane::Pane;
+use crossbeam_channel::{Sender, bounded};
+use anyhow::Error;
 
 pub type PaneSize = Option<(u16, u16)>;
 
@@ -24,14 +25,17 @@ pub struct ResizeTask {
 
 impl MasterControl {
     pub fn new(output_tx: Sender<ProcOutput>) -> MasterControl {
-        let (cmd_tx, cmd_rx) = channel();
-        let (resp_tx, resp_rx) = channel();
+        let (cmd_tx, cmd_rx) = bounded(20);
+        let (resp_tx, resp_rx) = bounded(20);
         let mut orchestrator = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx);
         let proc_orc_stdin_tx= orchestrator.input_tx();
 
         thread::spawn(move || {
             info!("Starting ProcessOrchestrator");
-            orchestrator.run().unwrap();
+            match orchestrator.run() {
+                Ok(_) => { info!("ProcessOrchestrator stopped"); }
+                Err(e) => { error!("ProcessOrchestator crashed: {}", e)}
+            }
         });
 
         MasterControl {

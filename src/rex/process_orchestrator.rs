@@ -1,11 +1,11 @@
 use crate::rex::{ProcessOrchestrator, ProcOutput};
 use crate::rex::child::ChildProcess;
-use std::sync::mpsc::{Sender, Receiver, channel, TryRecvError};
 use std::collections::HashMap;
 use std::thread;
 use log::info;
 use crate::rex::master_control::{RegisterTask, ResizeTask};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crossbeam_channel::{Sender, Receiver, bounded, TryRecvError};
 
 impl ProcessOrchestrator {
     /***
@@ -13,7 +13,7 @@ impl ProcessOrchestrator {
     @arg output_tx: A sender to transmit aggregated output
      */
     pub fn new(output_tx: Sender<ProcOutput>, cmd_rx: Receiver<String>, resp_tx: Sender<String>) -> ProcessOrchestrator {
-        let (input_tx, input_rx) = channel();
+        let (input_tx, input_rx) = bounded(20);
         let proc_io_channels = HashMap::<String, (Sender<String>, Receiver<String>)>::new();
         let proc_command_channels = HashMap::<String, (Sender<String>, Receiver<String>)>::new();
 
@@ -143,8 +143,8 @@ impl ProcessOrchestrator {
                         info!("Cannot run {} - no terminal size was assigned! Does this have a pane?", task_id);
                     }
                     Some((width, height)) => {
-                        let (out_tx, out_rx) = channel();
-                        let (status_tx, status_rx) = channel();
+                        let (out_tx, out_rx) = bounded(20);
+                        let (status_tx, status_rx) = bounded(20);
                         let mut new_kid = ChildProcess::new(task.command.as_str(),
                                                             task.path.as_str(),
                                                             out_tx, status_tx.clone(),
@@ -240,9 +240,9 @@ impl ProcessOrchestrator {
 mod tests {
     use super::*;
     fn instance() -> ProcessOrchestrator {
-        let (output_tx, _) = channel();
-        let (_, cmd_rx) = channel();
-        let (resp_tx, _) = channel();
+        let (output_tx, _) = bounded(20);
+        let (_, cmd_rx) = bounded(20);
+        let (resp_tx, _) = bounded(20);
         let po = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx);
         po
     }

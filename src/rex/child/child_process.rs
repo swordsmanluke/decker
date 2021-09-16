@@ -1,5 +1,5 @@
 use crate::rex::child::ChildProcess;
-use std::sync::mpsc::{Sender, channel};
+use crossbeam_channel::{Sender, bounded};
 use std::io::{Read, Write};
 use log::{info, error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, MasterPty, SlavePty };
@@ -13,7 +13,7 @@ struct PtyProcess {
 
 impl ChildProcess {
     pub fn new(command: &str, path: &str, out_tx: Sender<String>, status_tx: Sender<String>, size: (u16,u16)) -> ChildProcess {
-        let (in_tx, in_rx) = channel();
+        let (in_tx, in_rx) = bounded(20);
         ChildProcess {
             command: command.to_owned(),
             path: path.to_owned(),
@@ -122,7 +122,7 @@ impl ChildProcess {
             if first_out { first_out = false }
 
             // Exit code?
-            if output[size-2] == 94 && output[size-1] == 90 {
+            if size >= 2 && output[size-2] == 94 && output[size-1] == 90 {
                 break;
             };
 

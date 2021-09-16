@@ -1,4 +1,3 @@
-use std::sync::mpsc::{channel, SendError};
 use std::io::{Read, Write, stdout};
 use log::{ info, error };
 use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
@@ -9,6 +8,8 @@ use crate::rex::{MasterControl, TaskId};
 use crate::rex::terminal::pane::{Pane, ScrollMode};
 use crate::rex::terminal::PaneManager;
 use crate::rex::config::load_task_config;
+use std::time::SystemTime;
+use crossbeam_channel::bounded;
 
 mod rex;
 
@@ -19,7 +20,7 @@ fn run() -> anyhow::Result<()> {
     let mut stdin = termion::async_stdin();
     let mut stdout = stdout().into_raw_mode()?;
 
-    let (output_tx, mut output_rx) = channel();
+    let (output_tx, mut output_rx) = bounded(50); //channel();
     let mut mcp = MasterControl::new(output_tx);
     let mut pane_manager = PaneManager::new();
 
@@ -54,14 +55,20 @@ fn run() -> anyhow::Result<()> {
     println!("\x1b[2J"); // clear screen before we begin
 
     thread::spawn(move ||{
+        let mut last_printed = SystemTime::UNIX_EPOCH;
         // read stdout and display it
-        loop {
-            if let Ok(pout) = output_rx.recv() {
-                pane_manager.push(pout.name, &pout.output);
+        while let Ok(pout) = output_rx.recv() {
+            // Capture the output
+            pane_manager.push(pout.name, &pout.output);
+
+            // if it's been more than 30 ms, go ahead and render.
+            if SystemTime::now().duration_since(last_printed).unwrap().as_millis() > 30 {
                 pane_manager.write(&mut stdout).unwrap();
                 stdout.flush().unwrap();
             }
-        }});
+        }
+        info!("main: Exited top-level output forwarding");
+    });
 
     loop {
         // read stdin and forward it to the active proc.
@@ -70,11 +77,12 @@ fn run() -> anyhow::Result<()> {
             info!("Sending input: {:?}", input);
             match input_tx.send(input.clone()) {
                 Ok(_) => {}
-                Err(err) => { error!("{}", err); break;}
+                Err(err) => { error!("main: {}", err); break;}
             }
             input.clear();
         }
     }
+    info!("main: Exited top-level input forwarding");
 
     Ok(())
 }
@@ -100,5 +108,5 @@ fn main() {
         Err(err) => { error!("{:?}", err); }
     }
 
-    println!("{}", "Shutdown!");
+    println!("\x1B[0m{}", "Shutdown!");
 }
