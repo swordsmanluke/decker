@@ -43,6 +43,7 @@ fn run() -> anyhow::Result<()> {
             }
             Some(p) => {
                 mcp.register(task.clone(), Some((p.width, p.height)))?;
+                mcp.execute(&task.id)?;
             }
         }
     }

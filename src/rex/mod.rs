@@ -78,7 +78,7 @@ struct ProcessOrchestrator {
     // Track all of our registered tasks
     tasks: HashMap<String, Task>,
     sizes: HashMap<String, PaneSize>,
-    last_run: HashMap<TaskId, SystemTime>,
+    next_run: HashMap<TaskId, u64>,
 
     // Should we keep running?
     shutdown: bool,

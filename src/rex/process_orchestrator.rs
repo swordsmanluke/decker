@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::thread;
 use log::info;
 use crate::rex::master_control::{RegisterTask, ResizeTask};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use crossbeam_channel::{Sender, Receiver, TryRecvError, unbounded};
 
 impl ProcessOrchestrator {
@@ -19,7 +19,7 @@ impl ProcessOrchestrator {
         ProcessOrchestrator {
             tasks: HashMap::new(),
             sizes: HashMap::new(),
-            last_run: HashMap::new(),
+            next_run: HashMap::new(),
             command_rx: cmd_rx,
             resp_tx: resp_tx,
             output_tx,
@@ -101,13 +101,15 @@ impl ProcessOrchestrator {
                 info!("Could not find task {} to execute in {:?}", task_id, self.tasks.keys());
             }
             Some(task) => {
-                self.last_run.insert(task_id.to_string(), SystemTime::now());
+                match task.period_secs {
+                    None => {}
+                    Some(period) => {
+                        let next_run = SystemTime::now().checked_add(Duration::new(period, 0)).unwrap().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                        self.next_run.insert(task_id.to_string(), next_run);
+                    }
+                }
 
                 let size = self.sizes.get(task_id);
-                if size.is_none() {
-                    info!("Cannot run {} - no terminal size was assigned! Does this have a pane?", task_id);
-                    return Ok(());
-                }
 
                 match size.unwrap() {
                     None => {
@@ -118,13 +120,14 @@ impl ProcessOrchestrator {
                                                             task.path.as_str(),
                                                             self.output_tx.clone(),
                                                             (*height, *width));
-                        // TODO: What if this task already has named channels? Should I only create once
-                        //       and reuse? Or replace them every time?
+
                         self.proc_io_channels.insert(task_id.to_string(), new_kid.input_tx());
+
                         let run_interactively = match self.active_proc.clone() {
                             None => { false }
                             Some(active_task) => { task_id == active_task }
                         };
+
                         let pane_id = match self.active_proc.clone() {
                             None => { task_id }
                             Some(active_task) => { if active_task == task_id { "main" } else { task_id} }
@@ -189,18 +192,23 @@ impl ProcessOrchestrator {
     }
 
     fn run_periodic_tasks(&mut self) -> anyhow::Result<()> {
-        let ready_task_ids = self.tasks.iter().
-            filter(|(_, t)| t.period.is_some()). // period tasks
-            filter(|(id, t)| {          // which are redy to run
-                let time_of_last_run = *self.last_run.get(*id).unwrap_or(&UNIX_EPOCH);
-                let elapsed = SystemTime::now().duration_since(time_of_last_run).unwrap().as_secs();
-                t.ready_to_run(elapsed)
-            }).map(|(id, _)| id.clone()).
-            collect::<Vec<String>>();
+        let now_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        if self.next_run.values().any(|timestamp| *timestamp < now_timestamp) {
+            // Only need to check if there's at least one timestamp that's ready to go
+            let ready_task_ids = self.tasks.iter().
+                filter(|(_, t)| t.period.is_some()). // period tasks
+                filter(|(id, t)| {          // which are redy to run
+                    match self.next_run.get(*id) {
+                        Some(next_run_timestamp) => { now_timestamp >= *next_run_timestamp }
+                        None => { false }
+                    }
+                }).map(|(id, _)| id.clone()).
+                collect::<Vec<String>>();
 
-        //  Separate loops to satisfy borrow checker
-        for id in ready_task_ids {
-            self.execute(&id)?;
+            //  Separate loops to satisfy borrow checker
+            for id in ready_task_ids {
+                self.execute(&id)?;
+            }
         }
 
         Ok(())
