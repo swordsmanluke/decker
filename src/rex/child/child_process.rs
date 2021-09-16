@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use log::{info, error};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system, Child, MasterPty, SlavePty };
 use std::time::Duration;
+use crate::rex::ProcOutput;
 
 struct PtyProcess {
     master: Box<dyn MasterPty + Send>,
@@ -12,7 +13,7 @@ struct PtyProcess {
 }
 
 impl ChildProcess {
-    pub fn new(command: &str, path: &str, out_tx: Sender<String>, status_tx: Sender<String>, size: (u16,u16)) -> ChildProcess {
+    pub fn new(command: &str, path: &str, out_tx: Sender<ProcOutput>, size: (u16,u16)) -> ChildProcess {
         let (in_tx, in_rx) = bounded(20);
         ChildProcess {
             command: command.to_owned(),
@@ -20,7 +21,6 @@ impl ChildProcess {
             input_receiver: in_rx,
             input_sender: in_tx,
             output_sender: out_tx,
-            status_sender: status_tx,
             size: size,
             process: None
         }
@@ -36,7 +36,7 @@ impl ChildProcess {
     /***
     Launches the child's process and runs until the process exits
     ***/
-    pub fn run(&mut self, interactive: bool) -> anyhow::Result<()> {
+    pub fn run(&mut self, pane: String, interactive: bool) -> anyhow::Result<()> {
         info!("Running {}", self.command);
         let mut child_proc = self.launch()?;
 
@@ -48,13 +48,13 @@ impl ChildProcess {
         std::thread::spawn( move || {
             if interactive {
                 info!("{}: Running interactively", command.clone());
-                match ChildProcess::forward_output(reader, sender) {
+                match ChildProcess::forward_output(reader, sender, pane.clone()) {
                     Ok(_) => {}
                     Err(e) => { error!("{:?}", e)}
                 }
             } else {
                 info!("{}: Running non-interactively", command.clone());
-                match ChildProcess::capture_output(reader, sender, command.clone()) {
+                match ChildProcess::capture_output(reader, sender, pane.clone()) {
                     Ok(_) => {}
                     Err(e) => { error!("{:?}", e)}
                 }
@@ -86,10 +86,10 @@ impl ChildProcess {
         Ok(())
     }
 
-    fn capture_output(mut reader: Box<dyn Read + Send>, sender: Sender<String>, cmd: String) -> anyhow::Result<()> {
+    fn capture_output(mut reader: Box<dyn Read + Send>, sender: Sender<ProcOutput>, pane: String) -> anyhow::Result<()> {
         let mut buffer = [0u8; 1024];
         let mut output = String::new();
-        info!("{}: Reading from reader to string", cmd);
+        info!("{}: Reading from reader to string", pane);
         loop {
             match reader.read(&mut buffer) {
                 Ok(size) => {
@@ -99,19 +99,21 @@ impl ChildProcess {
                     };
                     output += &String::from_utf8(buffer[..size].to_owned())?;
                 }
-                Err(e) => { error!("{}: Error reading from proc: {}", cmd, e); break; }
+                Err(e) => { error!("{}: Error reading from proc: {}", pane, e); break; }
             }
         }
 
-        info!("{}: Read output {}", cmd, output);
+        info!("{}: Read output {}", pane, output);
 
         let prefix = String::from("\x1b[2J");
-        sender.send(format!("{}{}", prefix, output)).unwrap();
+        let output = format!("{}{}", prefix, output);
+
+        sender.send(ProcOutput{ name: pane, output }).unwrap();
 
         Ok(())
     }
 
-    fn forward_output(mut reader: Box<dyn Read + Send>, sender: Sender<String>) -> anyhow::Result<()>{
+    fn forward_output(mut reader: Box<dyn Read + Send>, sender: Sender<ProcOutput>, pane: String) -> anyhow::Result<()>{
         let mut output = [0u8; 1024];
         let mut first_out = true;
         loop {
@@ -126,7 +128,9 @@ impl ChildProcess {
                 break;
             };
 
-            sender.send(format!("{}{}", prefix, child_output))?;
+            let output = format!("{}{}", prefix, child_output);
+
+            sender.send(ProcOutput{ name: pane.clone(), output }).unwrap();
         }
 
         Ok(())

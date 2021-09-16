@@ -5,7 +5,7 @@ use std::thread;
 use log::info;
 use crate::rex::master_control::{RegisterTask, ResizeTask};
 use std::time::{SystemTime, UNIX_EPOCH};
-use crossbeam_channel::{Sender, Receiver, bounded, TryRecvError};
+use crossbeam_channel::{Sender, Receiver, TryRecvError, unbounded};
 
 impl ProcessOrchestrator {
     /***
@@ -13,9 +13,8 @@ impl ProcessOrchestrator {
     @arg output_tx: A sender to transmit aggregated output
      */
     pub fn new(output_tx: Sender<ProcOutput>, cmd_rx: Receiver<String>, resp_tx: Sender<String>) -> ProcessOrchestrator {
-        let (input_tx, input_rx) = bounded(20);
-        let proc_io_channels = HashMap::<String, (Sender<String>, Receiver<String>)>::new();
-        let proc_command_channels = HashMap::<String, (Sender<String>, Receiver<String>)>::new();
+        let (input_tx, input_rx) = unbounded();
+        let proc_io_channels = HashMap::<String, Sender<String>>::new();
 
         ProcessOrchestrator {
             tasks: HashMap::new(),
@@ -27,7 +26,6 @@ impl ProcessOrchestrator {
             input_tx,
             input_rx,
             proc_io_channels,
-            proc_command_channels,
             active_proc: None,
             shutdown: false
         }
@@ -46,7 +44,6 @@ impl ProcessOrchestrator {
     pub fn run(&mut self) -> anyhow::Result<()>{
         loop {
             self.forward_input()?;
-            self.process_output()?;
             self.process_commands()?;
             self.run_periodic_tasks()?;
 
@@ -65,7 +62,7 @@ impl ProcessOrchestrator {
                 match &self.active_proc {
                     Some(proc_name) => {
                         // Forward these bytes to the active process
-                        let (tx, _) = self.proc_io_channels.get_mut(proc_name.as_str()).unwrap();
+                        let tx= self.proc_io_channels.get_mut(proc_name.as_str()).unwrap();
                         // TODO: Handle tx.send returns an Err due to closed channel
                         tx.send(input.clone())?;
                     }
@@ -75,21 +72,6 @@ impl ProcessOrchestrator {
             Err(TryRecvError::Empty) => {}
             Err(_) => { /* TODO */ }
         }
-        Ok(())
-    }
-
-    fn process_output(&mut self) -> anyhow::Result<()>{
-        self.proc_io_channels.iter().for_each({|(name, (_, rx))|
-            match rx.try_recv() {
-                Ok(s) => {
-                    let pane_id = if self.active_proc == Some(name.clone()) { "main".to_string() } else { name.clone() };
-                    let proc_output = ProcOutput{name: pane_id, output: s};
-                    self.output_tx.send(proc_output).unwrap()  ; }
-                Err(TryRecvError::Empty) => {}
-                Err(_) => { /* TODO */ }
-            }
-        });
-
         Ok(())
     }
 
@@ -109,17 +91,6 @@ impl ProcessOrchestrator {
         Ok(())
     }
 
-
-    /***
-    Delete a task by name
-     */
-    fn delete(&mut self, task_id: &String) -> anyhow::Result<()> {
-        self.tasks.remove(task_id);
-        self.proc_command_channels.remove(task_id);
-        self.proc_io_channels.remove(task_id);
-
-        Ok(())
-    }
 
     /***
     Execute a task by name
@@ -143,23 +114,24 @@ impl ProcessOrchestrator {
                         info!("Cannot run {} - no terminal size was assigned! Does this have a pane?", task_id);
                     }
                     Some((width, height)) => {
-                        let (out_tx, out_rx) = bounded(20);
-                        let (status_tx, status_rx) = bounded(20);
                         let mut new_kid = ChildProcess::new(task.command.as_str(),
                                                             task.path.as_str(),
-                                                            out_tx, status_tx.clone(),
+                                                            self.output_tx.clone(),
                                                             (*height, *width));
                         // TODO: What if this task already has named channels? Should I only create once
                         //       and reuse? Or replace them every time?
-                        self.proc_io_channels.insert(task_id.to_string(), (new_kid.input_tx(), out_rx));
-                        self.proc_command_channels.insert(task_id.to_string(), (status_tx, status_rx));
+                        self.proc_io_channels.insert(task_id.to_string(), new_kid.input_tx());
                         let run_interactively = match self.active_proc.clone() {
                             None => { false }
                             Some(active_task) => { task_id == active_task }
                         };
+                        let pane_id = match self.active_proc.clone() {
+                            None => { task_id }
+                            Some(active_task) => { if active_task == task_id { "main" } else { task_id} }
+                        }.to_string();
 
                         thread::spawn( move || {
-                            new_kid.run(run_interactively).unwrap();
+                            new_kid.run(pane_id, run_interactively).unwrap();
                         });
                     }
                 }
@@ -228,7 +200,7 @@ impl ProcessOrchestrator {
 
         //  Separate loops to satisfy borrow checker
         for id in ready_task_ids {
-            self.execute(&id);
+            self.execute(&id)?;
         }
 
         Ok(())
@@ -240,9 +212,9 @@ impl ProcessOrchestrator {
 mod tests {
     use super::*;
     fn instance() -> ProcessOrchestrator {
-        let (output_tx, _) = bounded(20);
-        let (_, cmd_rx) = bounded(20);
-        let (resp_tx, _) = bounded(20);
+        let (output_tx, _) = unbounded();
+        let (_, cmd_rx) = unbounded();
+        let (resp_tx, _) = unbounded();
         let po = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx);
         po
     }

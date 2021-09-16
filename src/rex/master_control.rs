@@ -6,8 +6,7 @@ use std::ops::Deref;
 use simple_error::bail;
 use serde::{Serialize, Deserialize};
 use crate::rex::terminal::pane::Pane;
-use crossbeam_channel::{Sender, bounded};
-use anyhow::Error;
+use crossbeam_channel::{Sender, bounded, unbounded};
 
 pub type PaneSize = Option<(u16, u16)>;
 
@@ -25,8 +24,8 @@ pub struct ResizeTask {
 
 impl MasterControl {
     pub fn new(output_tx: Sender<ProcOutput>) -> MasterControl {
-        let (cmd_tx, cmd_rx) = bounded(20);
-        let (resp_tx, resp_rx) = bounded(20);
+        let (cmd_tx, cmd_rx) = unbounded();
+        let (resp_tx, resp_rx) = unbounded();
         let mut orchestrator = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx);
         let proc_orc_stdin_tx= orchestrator.input_tx();
 

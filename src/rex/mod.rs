@@ -93,7 +93,6 @@ struct ProcessOrchestrator {
     input_rx: Receiver<String>,
 
     // Channels for communicating with individual processes
-    proc_io_channels: HashMap::<String, (Sender<String>, Receiver<String>)>,
-    proc_command_channels: HashMap::<String, (Sender<String>, Receiver<String>)>,
+    proc_io_channels: HashMap::<String, Sender<String>>,
     active_proc: Option<String>
 }
