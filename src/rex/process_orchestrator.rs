@@ -15,11 +15,10 @@ impl ProcessOrchestrator {
     Create a new ProcessOrchestrator.
     @arg output_tx: A sender to transmit aggregated output
      */
-    pub fn new(output_tx: Sender<ProcOutput>, cmd_rx: Receiver<String>, resp_tx: Sender<String>, input_rx: Receiver<String>) -> ProcessOrchestrator {
-        // TODO: Get the actual size in here.
+    pub fn new(output_tx: Sender<ProcOutput>, cmd_rx: Receiver<String>, resp_tx: Sender<String>, input_rx: Receiver<String>, pane_size: (u16, u16)) -> ProcessOrchestrator {
         let pty = portable_pty::native_pty_system().openpty(PtySize {
-            rows: 80,
-            cols: 18,
+            rows: pane_size.0,
+            cols: pane_size.1,
             pixel_width: 0,
             pixel_height: 0,
         }).unwrap();

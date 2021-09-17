@@ -32,15 +32,6 @@ fn run() -> anyhow::Result<()> {
     let (cmd_tx, cmd_rx) = unbounded();
     let (resp_tx, resp_rx) = unbounded();
 
-    // Process Orchestrator is in charge of managing all of the processes and forwarding IO
-    // It's got to live in a different thread, however, so we communicate with it via the MCP
-    let orchestrator = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx, input_rx);
-    start_orchestrator(orchestrator);
-
-    // MasterControl is the nice, useful frontend that controls Process Orchestrator.
-    // It gives us easy methods for registering and executing tasks, etc.
-    let mut mcp = MasterControl::new(cmd_tx, resp_rx);
-
     // Pane Manager is a glorified hash map. It provides methods for working
     // with panes without having to call .get().unwrap() everywhere.
     let mut pane_manager = PaneManager::new();
@@ -52,7 +43,18 @@ fn run() -> anyhow::Result<()> {
         pane_manager.register(p.task_id, new_pane);
     }
 
-    //  and register all the configured Tasks
+    let main_pane = pane_manager.find_by_id("main").unwrap();
+
+    // Process Orchestrator is in charge of managing all of the processes and forwarding IO
+    // It's got to live in a different thread, however, so we communicate with it via the MCP
+    let orchestrator = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx, input_rx, (main_pane.width, main_pane.height));
+    start_orchestrator(orchestrator);
+
+    // MasterControl is the nice, useful frontend that controls Process Orchestrator.
+    // It gives us easy methods for registering and executing tasks, etc.
+    let mut mcp = MasterControl::new(cmd_tx, resp_rx);
+
+    //  Now we can register all the configured Tasks
     for mut task in hex_cfg.tasks {
         task.cache_period(); // TODO: This is an ugly solution. We don't call 'Task::new', so we don't have the usual hook to do this sorta call
         match pane_manager.find_by_id(&task.id) {
