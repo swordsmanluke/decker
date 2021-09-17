@@ -1,12 +1,14 @@
-use crate::rex::terminal::internal::{StreamState, TerminalOutput};
+use crate::rex::terminal::internal::{StreamState, TerminalOutput, VT100};
 use crate::rex::terminal::internal::VT100State::{PlainText, FoundEsc};
 use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
 use regex::Regex;
 use lazy_static::lazy_static;
+use std::str::FromStr;
 
 lazy_static! {
-    static ref CSI_BEGINNING: Regex = Regex::new(r"(\x1b\[|\x9b|>|=)").unwrap();
-    static ref VT100_REGEX: Regex = Regex::new(r"((\x1b\[|\x9b|>|=)[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e>=])+").unwrap();
+    static ref CSI_BEGINNING: Regex = Regex::new(r"\x1b[\[\x9b>=MD]").unwrap();
+    static ref VT100_REGEX:  Regex = Regex::new(r"\x1b[\[\x9b>=MD]([0-?]*[ -/]*[@-~>=])").unwrap();
+    static ref VT100_SCROLL_REGEX: Regex = Regex::new(r"\x1b[MD]").unwrap();
 }
 
 impl StreamState {
@@ -60,7 +62,7 @@ impl StreamState {
         let buf_str = self.buffer.clone();
 
         if self.is_esc_seq_complete() {
-            self.vetted_output.push(CSI(buf_str));
+            self.vetted_output.push(CSI(VT100::from_str(&buf_str.as_str()).unwrap()));
         } else {
             self.vetted_output.push(Plaintext(buf_str));
         }
@@ -73,7 +75,9 @@ impl StreamState {
     }
 
     fn is_esc_seq_complete(&self) -> bool {
-        self.is_esc_seq() && VT100_REGEX.is_match(&self.buffer)
+        self.is_esc_seq() && (
+            VT100_REGEX.is_match(&self.buffer) ||
+            VT100_SCROLL_REGEX.is_match(&self.buffer))
     }
 
     pub fn is_complete(&self) -> bool {
@@ -81,7 +85,7 @@ impl StreamState {
         let have_vetted_output = self.vetted_output.iter().any(
             |v| match v {
                 Plaintext(s) => { !s.is_empty() }
-                CSI(s) => { !s.is_empty() }
+                CSI(_) => { true } // CSIs always have contents
             }
         );
         self.buffer.ends_with('\x1b') || have_vetted_output
@@ -195,6 +199,16 @@ mod tests {
         s.push("\x1b");
         let out = s.consume();
         assert_eq!(as_raw_string(&out), String::from("some chars\x1b"))
+    }
+
+    #[test]
+    fn it_recognizes_scroll_commands() {
+        let mut s = given_a_stream_with_chars("\x1bM\x1bD");
+        let out = s.consume();
+        assert!(out.iter().all(|s| match s {
+            CSI(_) => { true }
+            _ => { false }
+        }), format!("not all of {:?} are CSIs!", &out));
     }
 
     #[test]

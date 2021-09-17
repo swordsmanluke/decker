@@ -1,5 +1,3 @@
-use lazy_static::lazy_static;
-use regex::{Regex};
 use std::cmp::{max, min};
 use crate::rex::terminal::pane::PrintStyle;
 use std::io::Write;
@@ -30,10 +28,6 @@ impl Default for Glyph {
     fn default() -> Self {
         Glyph::new(' ', PrintStyle::default())
     }
-}
-
-lazy_static! {
-    static ref VT100_REGEX: Regex = Regex::new(r"((\u001b\[|\u009b)[\u0030-\u003f]*[\u0020-\u002f]*[\u0040-\u007e])+").unwrap();
 }
 
 impl Debug for GlyphString {
@@ -114,7 +108,7 @@ impl GlyphString {
         let output = format!("{}{}{}{}",
                                  set_cursor,
                                  line_style,
-                                 self.string_rep,
+                                 self.str_with_width(width as usize),
                                  reset_style);
 
         let pad_width = if self.len() < width as usize {
@@ -153,6 +147,28 @@ impl GlyphString {
 
         self.string_rep = output;
         self.make_dirty();
+    }
+
+    fn str_with_width(&mut self, width: usize) -> String {
+        let mut output = String::new();
+        let mut cur_style = self.glyphs.first().unwrap_or(&Glyph::default()).style.clone(); // No mutating args!
+
+        self.glyphs.iter_mut().take(width).for_each(|g| {
+            g.dirty = false; // We've printed you now!
+
+            // Make sure to keep the correct style for each glyph
+            let diff = cur_style.diff_str(&g.style);
+
+            if diff.len() > 0 {
+                debug!("Updating style. FG/BG: {}/{} Str: {}", g.style.foreground, g.style.background, g.c);
+                cur_style = g.style;
+                output.push_str(&diff);
+            }
+
+            output.push(g.c);
+        });
+
+        output
     }
 
     pub fn len(&self) -> usize {

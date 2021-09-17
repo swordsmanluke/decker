@@ -1,6 +1,6 @@
 use crate::rex::terminal::internal::glyph_string::GlyphString;
 use regex::Regex;
-use crate::rex::terminal::internal::StreamState;
+use crate::rex::terminal::internal::{StreamState, VT100};
 use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
 use std::cmp::{min, max};
 use std::io::Write;
@@ -409,20 +409,24 @@ impl Pane {
                     // 3) Clear some text
                     // 4) Print to the terminal as if it were plaintext
                     info!("{}: Handling CSI: {:?}", self.id, vt100_code);
-                    let last_char = vt100_code.chars().last().unwrap();
-                    match last_char {
-                        'm' => { self.print_state.apply_vt100(&vt100_code)? }
-                        'H' | 'f' | 'A' | 'B' | 'C' | 'D' => {
+                    match vt100_code {
+                        VT100::SGR(code) => { self.print_state.apply_vt100(&code)? }
+                        VT100::ScrollDown(_) => { self.cursor.incr_y(1); }
+                        VT100::ScrollUp(_) => { self.cursor.decr_y(1) }
+                        VT100::MoveCursor(code) |
+                        VT100::MoveCursorApp(code)=> {
                             /* cursor movement */
-                            self.move_cursor(&vt100_code)?
+                            self.move_cursor(&code)?
                         }
-                        'J' | 'K' | 'L' => {
+                        VT100::ClearLine(code) |
+                        VT100::EraseLine(code) |
+                        VT100::EraseScreen(code) => {
                             /* text deletion */
-                            self.delete_text(&vt100_code)?
+                            self.delete_text(&code)?
                         }
-                        'h' | 'l' => {
+                        VT100::PassThrough(code) => {
                             /* Loads of control options */
-                            match vt100_code.as_str() {
+                            match code.as_str() {
                                 // Bracketed paste is safe to just send direct to STDOUT. We
                                 // won't be running more than one active program at a time, so
                                 // it shouldn't matter.
@@ -435,7 +439,7 @@ impl Pane {
                                     // All of these can be managed by the
                                     // top level terminal emulator...
                                     // if vt100_code != "\x1b[?25l" {  /* hide cursor */
-                                    print!("{}", vt100_code);
+                                    print!("{}", code);
                                     // }
                                 }
                                 // Alternate screen
@@ -450,24 +454,10 @@ impl Pane {
                                 _ => {}
                             }
                         }
-                        'r' => { /* Set top and bottom lines of window. Ignored*/ }
-                        'n' => {
-                            /* Terminal queries */
-                            match vt100_code.as_str() {
-                                "\x1b[6n" => {
-                                    // Query the (virtual) cursor pos
-                                    let response = format!("\x1b[{};{}R", self.cursor.y, self.cursor.x);
-                                    // TODO: Send this as input
-                                }
-                                _ => {
-                                    info!("{}: Unhandled query!", self.id);
-                                }
-                            }
-                        }
-                        _ => {
+                        VT100::Unknown(code) => {
                             /* Just print these directly... I guess */
-                            info!("{}: Unknown CSI {:?}", self.id, vt100_code);
-                            print!("{}", vt100_code);
+                            info!("{}: Unknown CSI {:?}", self.id, code);
+                            print!("{}", code);
                         }
                     }
                 }
