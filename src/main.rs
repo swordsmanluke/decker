@@ -47,7 +47,7 @@ fn run() -> anyhow::Result<()> {
 
     // Process Orchestrator is in charge of managing all of the processes and forwarding IO
     // It's got to live in a different thread, however, so we communicate with it via the MCP
-    let orchestrator = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx, input_rx, (main_pane.width, main_pane.height));
+    let orchestrator = ProcessOrchestrator::new(output_tx, cmd_tx.clone(), cmd_rx, resp_tx, input_rx, (main_pane.width, main_pane.height));
     start_orchestrator(orchestrator);
 
     // MasterControl is the nice, useful frontend that controls Process Orchestrator.

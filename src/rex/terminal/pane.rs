@@ -368,7 +368,15 @@ impl Pane {
                             '\t' => {
                                 // Replace tabs with 4 spaces
                                 let vert_line = self.cursor.y - 1;
-                                let line = self.lines.get_mut(vert_line as usize).unwrap();
+                                let line = match self.lines.get_mut(vert_line as usize){
+                                    None => {
+                                        while self.cursor.y as usize > self.lines.len() {
+                                            self.lines.push(GlyphString::new() );
+                                        }
+                                        self.lines.get_mut(vert_line as usize).unwrap()
+                                    }
+                                    Some(line) => { line }
+                                };
                                 for _ in 0..4 {
                                     line.set((self.cursor.x - 1) as usize, ' ', &self.print_state);
                                     self.cursor.incr_x(1);
@@ -475,13 +483,30 @@ impl Pane {
         let x_off = self.x;
         let y_off = self.y;
         let width = self.width;
+        let height = self.height;
         let pane_id = self.id.as_str();
         let mut chunks: Vec<u8> = Vec::with_capacity(1024);
 
-        self.lines.iter_mut().for_each(|line| {
+        let scrollable_pane = self.scroll_mode == ScrollMode::Scroll;
+        let lines = if self.lines.len() >= height as usize {
+            if scrollable_pane {
+                let offset = self.lines.len() - height as usize;
+                self.lines[offset..].iter_mut()
+            } else {
+                self.lines[..height as usize].iter_mut()
+            }
+        } else {
+            self.lines.iter_mut()
+        };
+
+        lines.for_each(|line| {
             if line.dirty() {
-                info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
-                line.write(x_off, y_off + line_idx, width, &ps, &mut chunks).unwrap();
+                let within_frame = line_idx < height;
+
+                if within_frame || scrollable_pane {
+                    info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
+                    line.write(x_off, y_off + line_idx, width, &ps, &mut chunks).unwrap();
+                }
             }
             line_idx += 1;
         });

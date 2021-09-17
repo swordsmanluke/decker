@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::rex::master_control::PaneSize;
 use lazy_static::lazy_static;
 use portable_pty::{PtyPair, Child};
+use std::sync::{Arc, RwLock};
 
 pub struct ProcOutput { pub name: String, pub output: String }
 
@@ -67,12 +68,13 @@ pub struct ProcessOrchestrator {
     // Track all of our registered tasks
     tasks: HashMap<String, Task>,
     sizes: HashMap<String, PaneSize>,
-    next_run: HashMap<TaskId, u64>,
+    next_run: Arc<RwLock<HashMap<TaskId, u64>>>,
 
     // Should we keep running?
     shutdown: bool,
 
     // Channels for command / response operations
+    command_tx: Sender<String>,
     command_rx: Receiver<String>,
     resp_tx: Sender<String>,
 

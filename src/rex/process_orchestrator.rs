@@ -1,22 +1,23 @@
-use crate::rex::{ProcessOrchestrator, ProcOutput};
+use crate::rex::{ProcessOrchestrator, ProcOutput, TaskId};
 use crate::rex::child::ChildProcess;
 use std::collections::HashMap;
 use std::thread;
-use log::info;
+use log::{info, error};
 use crate::rex::master_control::{RegisterTask, ResizeTask};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
-use crossbeam_channel::{Sender, Receiver, TryRecvError };
+use crossbeam_channel::{Sender, Receiver};
 use portable_pty::PtySize;
 use std::io::{Read, Write};
 use std::process::Command;
 use anyhow::anyhow;
+use std::sync::{Arc, RwLock};
 
 impl ProcessOrchestrator {
     /***
     Create a new ProcessOrchestrator.
     @arg output_tx: A sender to transmit aggregated output
      */
-    pub fn new(output_tx: Sender<ProcOutput>, cmd_rx: Receiver<String>, resp_tx: Sender<String>, input_rx: Receiver<String>, pane_size: (u16, u16)) -> ProcessOrchestrator {
+    pub fn new(output_tx: Sender<ProcOutput>, cmd_tx: Sender<String>, cmd_rx: Receiver<String>, resp_tx: Sender<String>, input_rx: Receiver<String>, pane_size: (u16, u16)) -> ProcessOrchestrator {
         let pty = portable_pty::native_pty_system().openpty(PtySize {
             rows: pane_size.0,
             cols: pane_size.1,
@@ -27,7 +28,8 @@ impl ProcessOrchestrator {
         ProcessOrchestrator {
             tasks: HashMap::new(),
             sizes: HashMap::new(),
-            next_run: HashMap::new(),
+            next_run: Arc::new(RwLock::new(HashMap::new())),
+            command_tx: cmd_tx,
             command_rx: cmd_rx,
             resp_tx: resp_tx,
             output_tx,
@@ -47,49 +49,24 @@ impl ProcessOrchestrator {
         info!("main: Starting ProcessOrchestrator");
         Self::start_forward_output_loop(self.main_pty.master.try_clone_reader()?, self.output_tx.clone())?;
         Self::start_forward_input_loop(self.input_rx.clone(), self.main_pty.master.try_clone_writer()?, "main".to_string());
-
-        let mut child_active_latch = false;
-        loop {
-            self.process_commands()?;
-            self.run_periodic_tasks()?;
-            self.has_active_task = match self.active_child.as_mut() {
-                None => { false }
-                Some(mut child) => { child.try_wait().unwrap().is_none() }
-            };
-
-            if self.has_active_task {
-               child_active_latch = true;
-            } else {
-                // Child is not running. If it _was_ running, log that we just switched off
-                if child_active_latch {
-                    info!("main: Active process has stopped");
-                    self.active_child = None;
-                    self.active_child = None;
-                }
-                child_active_latch = false;
-
-            }
-
-            if self.shutdown {
-                info!("main: Shutting down Orchestrator");
-                break;
-            }
-        }
+        Self::start_period_task_loop(self.next_run.clone(), self.command_tx.clone());
+        self.process_commands()?;
         Ok(())
     }
 
     fn process_commands(&mut self) -> anyhow::Result<()> {
-        match self.command_rx.try_recv() {
-            Ok(command) => {
-                info!("Process Orchestrator: Received command {}!", command);
-                let parts = command.split(":").map(|s| s.trim().to_string()).collect::<Vec<String>>();
-                let cmd = parts.first().unwrap(); // command part
-                let data = parts[1..].join(":");
+        while !self.shutdown {
+            match self.command_rx.recv() {
+                Ok(command) => {
+                    info!("Process Orchestrator: Received command {}!", command);
+                    let parts = command.split(":").map(|s| s.trim().to_string()).collect::<Vec<String>>();
+                    let cmd = parts.first().unwrap(); // command part
+                    let data = parts[1..].join(":");
 
-                self.handle_command(&cmd, &data)?;
+                    self.handle_command(&cmd, &data)?;
+                }
+                Err(e) => { return Err(e.into()); }
             }
-            Err(TryRecvError::Empty) => {}
-            Err(e) => { return Err(e.into()); }
         }
 
         Ok(())
@@ -105,14 +82,6 @@ impl ProcessOrchestrator {
                 info!("Could not find task {} to execute in {:?}", task_id, self.tasks.keys());
             }
             Some(task) => {
-                match task.period_secs {
-                    None => {}
-                    Some(period) => {
-                        let next_run = SystemTime::now().checked_add(Duration::new(period, 0)).unwrap().duration_since(UNIX_EPOCH).unwrap().as_secs();
-                        self.next_run.insert(task_id.to_string(), next_run);
-                    }
-                }
-
                 let size = self.sizes.get(task_id);
 
                 match size.unwrap() {
@@ -121,8 +90,8 @@ impl ProcessOrchestrator {
                     }
                     Some((width, height)) => {
                         let new_kid = ChildProcess::new(task.command.as_str(),
-                                                            task.path.as_str(),
-                                                            (*height, *width));
+                                                        task.path.as_str(),
+                                                        (*height, *width));
 
                         let run_interactively = match self.active_proc.clone() {
                             None => { false }
@@ -141,6 +110,25 @@ impl ProcessOrchestrator {
                             thread::spawn(move || {
                                 Self::capture_output(output_tx, new_kid, pane_id).unwrap();
                             });
+                        }
+
+                        match task.period_secs {
+                            None => {}
+                            Some(period) => {
+                                let run_at = SystemTime::now().
+                                    checked_add(Duration::new(period, 0)).
+                                    unwrap().
+                                    duration_since(UNIX_EPOCH).unwrap().
+                                    as_secs();
+
+                                match self.next_run.write() {
+                                    Ok(mut next) => {
+                                        next.insert(task_id.to_string(), run_at);
+                                        info!("PTL: Scheduling {} to run at {}", task_id, run_at);
+                                    }
+                                    Err(e) => { info!("Failed to store next run: {}", e); }
+                                }
+                            }
                         }
                     }
                 }
@@ -224,22 +212,46 @@ impl ProcessOrchestrator {
     fn handle_command(&mut self, command: &str, data: &str) -> anyhow::Result<()> {
         info!("Commanded to {}: {}", command, data);
 
-        match match command {
-            "execute" => { self.execute(data) }
+        let cmd_result = match command {
+            "execute" | "local_execute" => { self.execute(data) }
             "activate" => { self.activate_proc(data) }
             "register" => { self.register_task(data) }
             "resize" => { self.resize_task(data) }
-            "running" => { if self.has_active_task { Ok(()) } else { Err(anyhow!("not running")) } }
+            "running" => { if self.running() { Ok(()) } else { Err(anyhow!("not running")) } }
             _ => {
                 info!("Unsupported command: {}", command);
                 Ok(())
             }
-        } {
-            Err(e) => { self.resp_tx.send(format!("{}: Error - {}", command, e))? }
-            Ok(()) => { self.resp_tx.send(format!("{}: Success", command))? }
+        };
+
+        if !command.starts_with("local") {
+            match cmd_result {
+                Err(e) => { self.resp_tx.send(format!("{}: Error - {}", command, e))? }
+                Ok(()) => { self.resp_tx.send(format!("{}: Success", command))? }
+            }
         }
 
         Ok(())
+    }
+
+    fn running(&mut self) -> bool {
+        let child_was_running = self.has_active_task;
+
+        self.has_active_task = match self.active_child.as_mut() {
+            None => { false }
+            Some(child) => { child.try_wait().unwrap().is_none() }
+        };
+
+        if !self.has_active_task {
+            // Child is not running. But if it was at the last check, log that it switched off
+            if child_was_running {
+                info!("main: Active process has stopped");
+                self.active_child = None;
+                self.active_child = None;
+            }
+        }
+
+        self.has_active_task
     }
 
     fn register_task(&mut self, register_str: &str) -> anyhow::Result<()> {
@@ -257,27 +269,45 @@ impl ProcessOrchestrator {
         Ok(())
     }
 
-    fn run_periodic_tasks(&mut self) -> anyhow::Result<()> {
-        let now_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        if self.next_run.values().any(|timestamp| *timestamp < now_timestamp) {
-            // Only need to check if there's at least one timestamp that's ready to go
-            let ready_task_ids = self.tasks.iter().
-                filter(|(_, t)| t.period.is_some()). // periodic tasks
-                filter(|(id, _)| {                  // which are ready to run
-                    match self.next_run.get(*id) {
-                        Some(next_run_timestamp) => { now_timestamp >= *next_run_timestamp }
-                        None => { false }
+    fn start_period_task_loop(next_run_times: Arc<RwLock<HashMap<TaskId, u64>>>, commander: Sender<String>) {
+        thread::spawn(move || {
+            loop {
+                let now_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                info!("PTL: Awake - checking for tasks");
+
+                let ready_task_ids = match next_run_times.read() {
+                    Ok(next_run) => {
+                        next_run.iter().
+                            filter(|(_, timestamp)| now_timestamp >= **timestamp).
+                            map(|(t_id, _)| t_id).
+                            cloned().
+                            collect::<Vec<String>>()
                     }
-                }).map(|(id, _)| id.clone()).
-                collect::<Vec<String>>();
+                    Err(e) => {
+                        error!("PTL: Failed to read next_run: {}", e);
+                        Vec::new()
+                    }
+                };
 
-            //  Separate loops to satisfy borrow checker
-            for id in ready_task_ids {
-                self.execute(&id)?;
+                info!("PTL: Found {} tasks: {:?}", ready_task_ids.len(), ready_task_ids);
+
+                if ready_task_ids.is_empty() {
+                    let nap_duration = Duration::new(1, 0);
+                    info!("PTL: Sleeping for {:?}", nap_duration);
+                    thread::sleep(nap_duration);
+                    continue;
+                }
+
+                for id in ready_task_ids {
+                    info!("PTL: Sending local_execute command for: {}", id);
+                    commander.send(format!("local_execute: {}", id.to_owned())).unwrap();
+                    match next_run_times.write() {
+                        Ok(mut next_run) => { next_run.remove(&id); }
+                        Err(e) => { error!("PTL: Failed to remove {} from next_run: {}", id, e); }
+                    }
+                }
             }
-        }
-
-        Ok(())
+        });
     }
 }
 
@@ -288,10 +318,10 @@ mod tests {
 
     fn instance() -> ProcessOrchestrator {
         let (output_tx, _) = unbounded();
-        let (_, cmd_rx) = unbounded();
+        let (cmd_tx, cmd_rx) = unbounded();
         let (resp_tx, _) = unbounded();
         let (_, input_rx) = unbounded();
-        let po = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx, input_rx, (10, 10));
+        let po = ProcessOrchestrator::new(output_tx, cmd_tx, cmd_rx, resp_tx, input_rx, (10, 10));
         po
     }
 
