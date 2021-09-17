@@ -127,9 +127,9 @@ impl Default for PrintStyle {
 }
 
 lazy_static! {
-    static ref parm_rx: Regex = Regex::new("\x1b\\[([0-9;]*)%?m").unwrap();
-    static ref home_regex: Regex = Regex::new("\x1b\\[(\\d*);?(\\d*).").unwrap();
-    static ref cur_move_regex: Regex = Regex::new("\x1b\\[(\\d*).").unwrap();
+    static ref PARAM_REGEX: Regex = Regex::new("\x1b\\[([0-9;]*)%?m").unwrap();
+    static ref HOME_REGEX: Regex = Regex::new("\x1b\\[(\\d*);?(\\d*).").unwrap();
+    static ref CUR_MOVE_REGEX: Regex = Regex::new("\x1b\\[(\\d*).").unwrap();
 }
 
 impl PrintStyle {
@@ -233,7 +233,7 @@ impl PrintStyle {
     pub fn apply_vt100(&mut self, s: &str) -> anyhow::Result<()> {
         info!("Attempting to apply SGR command '{:?}'", s);
 
-        match parm_rx.captures(s) {
+        match PARAM_REGEX.captures(s) {
             None => { bail!("'{:?}' does not look like an SGR sequence!", s) }
             Some(captures) => {
                 let mut int_parts: Vec<u8> = captures.get(1).unwrap().as_str().
@@ -289,7 +289,7 @@ impl PrintStyle {
                         _ => { panic!("Invalid or unknown SGR code {}", sgr_code) }
                     }
 
-                    parm_rx.captures(s).unwrap();
+                    PARAM_REGEX.captures(s).unwrap();
                 }
             }
         }
@@ -389,7 +389,6 @@ impl Pane {
                                         } else {
                                             let vert_line = self.cursor.y - 1;
                                             let line = self.lines.get_mut(vert_line as usize).unwrap();
-                                            let len = line.len();
                                             line.set((self.cursor.x - 1) as usize, c, &self.print_state);
                                             self.cursor.incr_x(1);
                                         }
@@ -499,7 +498,7 @@ impl Pane {
 
         if chunks.len() > 0 {
             info!("Writing {} bytes", chunks.len());
-            write!(target, "{}", String::from_utf8(chunks)?);
+            write!(target, "{}", String::from_utf8(chunks)?)?;
         }
 
         Ok(())
@@ -605,7 +604,7 @@ impl Pane {
         let last_char = vt100_code.chars().last().unwrap();
         match last_char {
             'H' | 'f' => {
-                let captures = home_regex.captures(vt100_code).unwrap();
+                let captures = HOME_REGEX.captures(vt100_code).unwrap();
 
                 let row = match captures.get(1) {
                     None => { 0 }
@@ -648,7 +647,7 @@ impl Pane {
     }
 
     fn cursor_move_amount(vt100_code: &str) -> anyhow::Result<u16> {
-        let captures = cur_move_regex.captures(vt100_code).unwrap();
+        let captures = CUR_MOVE_REGEX.captures(vt100_code).unwrap();
         let out = match captures.get(1) {
             None => { 1 }
             Some(m) => { m.as_str().to_owned().parse::<u16>().unwrap_or(1) }
@@ -658,7 +657,7 @@ impl Pane {
     }
 
     fn deletion_type(vt100_code: &str) -> Option<u16> {
-        let captures = cur_move_regex.captures(vt100_code).unwrap();
+        let captures = CUR_MOVE_REGEX.captures(vt100_code).unwrap();
         match captures.get(1) {
             None => { None }
             Some(m) => { if m.as_str().is_empty() { None } else { Some(m.as_str().to_owned().parse::<u16>().unwrap()) } }

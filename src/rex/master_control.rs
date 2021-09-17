@@ -1,11 +1,10 @@
-use crate::rex::{MasterControl, ProcOutput, ProcessOrchestrator, Task, TaskId};
-use std::thread;
-use log::{info, warn, error};
+use crate::rex::{MasterControl, Task, TaskId};
+use log::{info, warn};
 use std::time::Duration;
 use std::ops::Deref;
 use simple_error::bail;
 use serde::{Serialize, Deserialize};
-use crossbeam_channel::{Sender, unbounded, Receiver};
+use crossbeam_channel::{Sender, Receiver};
 use crate::rex::terminal::Pane;
 
 pub type PaneSize = Option<(u16, u16)>;

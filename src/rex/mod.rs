@@ -10,7 +10,6 @@ pub(crate) mod config;
 
 use serde::{Deserialize, Serialize};
 use crate::rex::master_control::PaneSize;
-use std::time::SystemTime;
 use lazy_static::lazy_static;
 use portable_pty::PtyPair;
 
@@ -58,15 +57,6 @@ impl Task {
             self.period_secs = Some(period_seconds)
         }
     }
-
-    pub fn ready_to_run(&self, elapsed: u64) -> bool {
-        match self.period_secs {
-            None => { true } // aperiodic tasks can always be run
-            Some(period_seconds) => {
-                elapsed > period_seconds
-            }
-        }
-    }
 }
 
 //  All of the threaded functionality lives in the process orchestrator class
@@ -88,9 +78,10 @@ pub struct ProcessOrchestrator {
 
     // Channels for aggregated STDIN/OUT forwarding
     output_tx: Sender<ProcOutput>,
-    input_tx: Sender<String>,
     input_rx: Receiver<String>,
 
+    // The PTY for the main window
     main_pty: PtyPair,
+    // the name of the activated task
     active_proc: Option<String>
 }

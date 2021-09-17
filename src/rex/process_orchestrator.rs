@@ -2,10 +2,10 @@ use crate::rex::{ProcessOrchestrator, ProcOutput};
 use crate::rex::child::ChildProcess;
 use std::collections::HashMap;
 use std::thread;
-use log::{info, error};
+use log::info;
 use crate::rex::master_control::{RegisterTask, ResizeTask};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
-use crossbeam_channel::{Sender, Receiver, TryRecvError, unbounded};
+use crossbeam_channel::{Sender, Receiver, TryRecvError };
 use portable_pty::PtySize;
 use std::io::{Read, Write};
 use std::process::Command;
@@ -15,8 +15,7 @@ impl ProcessOrchestrator {
     Create a new ProcessOrchestrator.
     @arg output_tx: A sender to transmit aggregated output
      */
-    pub fn new(output_tx: Sender<ProcOutput>, cmd_rx: Receiver<String>, resp_tx: Sender<String>) -> ProcessOrchestrator {
-        let (input_tx, input_rx) = unbounded();
+    pub fn new(output_tx: Sender<ProcOutput>, cmd_rx: Receiver<String>, resp_tx: Sender<String>, input_rx: Receiver<String>) -> ProcessOrchestrator {
         // TODO: Get the actual size in here.
         let pty = portable_pty::native_pty_system().openpty(PtySize {
             rows: 80,
@@ -34,19 +33,11 @@ impl ProcessOrchestrator {
             command_rx: cmd_rx,
             resp_tx: resp_tx,
             output_tx,
-            input_tx,
             input_rx,
             main_pty: pty,
             active_proc: None,
             shutdown: false,
         }
-    }
-
-    /***
-    Get a Sender<String> clone on which to forward data from stdin
-     */
-    pub fn input_tx(&self) -> Sender<String> {
-        self.input_tx.clone()
     }
 
     /***
@@ -111,7 +102,7 @@ impl ProcessOrchestrator {
                         info!("Cannot run {} - no terminal size was assigned! Does this have a pane?", task_id);
                     }
                     Some((width, height)) => {
-                        let mut new_kid = ChildProcess::new(task.command.as_str(),
+                        let new_kid = ChildProcess::new(task.command.as_str(),
                                                             task.path.as_str(),
                                                             (*height, *width));
 
@@ -251,8 +242,8 @@ impl ProcessOrchestrator {
         if self.next_run.values().any(|timestamp| *timestamp < now_timestamp) {
             // Only need to check if there's at least one timestamp that's ready to go
             let ready_task_ids = self.tasks.iter().
-                filter(|(_, t)| t.period.is_some()). // period tasks
-                filter(|(id, t)| {          // which are redy to run
+                filter(|(_, t)| t.period.is_some()). // periodic tasks
+                filter(|(id, _)| {                  // which are ready to run
                     match self.next_run.get(*id) {
                         Some(next_run_timestamp) => { now_timestamp >= *next_run_timestamp }
                         None => { false }
