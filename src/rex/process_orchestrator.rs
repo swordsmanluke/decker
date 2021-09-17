@@ -9,6 +9,7 @@ use crossbeam_channel::{Sender, Receiver, TryRecvError };
 use portable_pty::PtySize;
 use std::io::{Read, Write};
 use std::process::Command;
+use anyhow::anyhow;
 
 impl ProcessOrchestrator {
     /***
@@ -23,8 +24,6 @@ impl ProcessOrchestrator {
             pixel_height: 0,
         }).unwrap();
 
-        info!("Created pty");
-
         ProcessOrchestrator {
             tasks: HashMap::new(),
             sizes: HashMap::new(),
@@ -35,6 +34,8 @@ impl ProcessOrchestrator {
             input_rx,
             main_pty: pty,
             active_proc: None,
+            active_child: None,
+            has_active_task: false,
             shutdown: false,
         }
     }
@@ -47,12 +48,30 @@ impl ProcessOrchestrator {
         Self::start_forward_output_loop(self.main_pty.master.try_clone_reader()?, self.output_tx.clone())?;
         Self::start_forward_input_loop(self.input_rx.clone(), self.main_pty.master.try_clone_writer()?, "main".to_string());
 
+        let mut child_active_latch = false;
         loop {
             self.process_commands()?;
             self.run_periodic_tasks()?;
+            self.has_active_task = match self.active_child.as_mut() {
+                None => { false }
+                Some(mut child) => { child.try_wait().unwrap().is_none() }
+            };
+
+            if self.has_active_task {
+               child_active_latch = true;
+            } else {
+                // Child is not running. If it _was_ running, log that we just switched off
+                if child_active_latch {
+                    info!("main: Active process has stopped");
+                    self.active_child = None;
+                    self.active_child = None;
+                }
+                child_active_latch = false;
+
+            }
 
             if self.shutdown {
-                info!("Shutting down Orchestrator");
+                info!("main: Shutting down Orchestrator");
                 break;
             }
         }
@@ -115,7 +134,8 @@ impl ProcessOrchestrator {
                         info!("{}: Running interactively: {}", pane_id, run_interactively);
 
                         if run_interactively {
-                            self.main_pty.slave.spawn_command(new_kid.command_for_pty()).unwrap();
+                            let child = self.main_pty.slave.spawn_command(new_kid.command_for_pty())?;
+                            self.active_child = Some(child);
                         } else {
                             let output_tx = self.output_tx.clone();
                             thread::spawn(move || {
@@ -209,6 +229,7 @@ impl ProcessOrchestrator {
             "activate" => { self.activate_proc(data) }
             "register" => { self.register_task(data) }
             "resize" => { self.resize_task(data) }
+            "running" => { if self.has_active_task { Ok(()) } else { Err(anyhow!("not running")) } }
             _ => {
                 info!("Unsupported command: {}", command);
                 Ok(())
@@ -263,12 +284,14 @@ impl ProcessOrchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossbeam_channel::unbounded;
 
     fn instance() -> ProcessOrchestrator {
         let (output_tx, _) = unbounded();
         let (_, cmd_rx) = unbounded();
         let (resp_tx, _) = unbounded();
-        let po = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx);
+        let (_, input_rx) = unbounded();
+        let po = ProcessOrchestrator::new(output_tx, cmd_rx, resp_tx, input_rx, (10, 10));
         po
     }
 

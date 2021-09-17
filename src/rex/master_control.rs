@@ -56,6 +56,18 @@ impl MasterControl {
         }
     }
 
+    pub fn running(&self) -> anyhow::Result<bool> {
+        self.send_command("running", "")?;
+        let resp = self.await_response("running").unwrap();
+        info!("main: Running response {}", resp.trim());
+
+        if resp.trim() == "Success" {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /***
     Select a child process to forward stdin to
      */

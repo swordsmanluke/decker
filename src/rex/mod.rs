@@ -11,7 +11,7 @@ pub(crate) mod config;
 use serde::{Deserialize, Serialize};
 use crate::rex::master_control::PaneSize;
 use lazy_static::lazy_static;
-use portable_pty::PtyPair;
+use portable_pty::{PtyPair, Child};
 
 pub struct ProcOutput { pub name: String, pub output: String }
 
@@ -82,6 +82,8 @@ pub struct ProcessOrchestrator {
 
     // The PTY for the main window
     main_pty: PtyPair,
-    // the name of the activated task
-    active_proc: Option<String>
+    // the name and child process of the activated task
+    active_proc: Option<String>,
+    active_child: Option<Box<dyn Child + Send>>,
+    has_active_task: bool // convenience field
 }

@@ -76,12 +76,12 @@ fn run() -> anyhow::Result<()> {
     println!("\x1b[2J"); // clear screen before we begin
 
     start_output_forwarding_thread(stdout, output_rx, pane_manager);
-    run_input_forwarding_loop(&mut stdin, input_tx); // doesn't return until shutdown
+    run_input_forwarding_loop(&mut stdin, input_tx, &mut mcp); // doesn't return until shutdown
 
     Ok(())
 }
 
-fn run_input_forwarding_loop(stdin: &mut AsyncReader, input_tx: Sender<String>) {
+fn run_input_forwarding_loop(stdin: &mut AsyncReader, input_tx: Sender<String>, mcp: &mut MasterControl) {
     let mut buffer: [u8; 1] = [0; 1];
 
     loop {
@@ -91,6 +91,13 @@ fn run_input_forwarding_loop(stdin: &mut AsyncReader, input_tx: Sender<String>) 
         // byte at a time. /shrug
         if let Ok(_) = stdin.read_exact(&mut buffer[..1]) {
             info!("main: Sending input: {:?}", buffer);
+            if buffer[0] == 3 { // Ctrl-C
+                if !mcp.running().unwrap() {
+                    info!("main: ^C means shutdown!");
+                    break;
+                };
+            }
+
             match input_tx.send(String::from(buffer[0] as char)) {
                 Ok(_) => {}
                 Err(err) => {
