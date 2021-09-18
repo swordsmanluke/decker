@@ -45,6 +45,13 @@ impl GlyphString {
         }
     }
 
+    pub fn last_style(&self) -> PrintStyle {
+        match self.glyphs.last() {
+            None => { PrintStyle::default() }
+            Some(g) => { g.style }
+        }
+    }
+
     pub fn dirty(&self) -> bool {
         self.dirty || self.glyphs.iter().any(|g| g.dirty)
     }

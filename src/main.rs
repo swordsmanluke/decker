@@ -19,7 +19,7 @@ fn run() -> anyhow::Result<()> {
 
     // base-level stdin/out channels
     let mut stdin = termion::async_stdin();
-    let mut stdout = stdout().into_raw_mode()?;
+    let stdout = stdout().into_raw_mode()?;
 
     // The channels we need for comms
     // input:  StdIn -> Active Process

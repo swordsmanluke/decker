@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::rex::TaskId;
-use crate::rex::terminal::internal::glyph_string::GlyphString;
-use crate::rex::terminal::internal::StreamState;
+use crate::rex::terminal::internal::{StreamState, ViewPort};
 use crate::rex::terminal::pane::PrintStyle;
 
 mod pane_manager;
@@ -19,9 +18,9 @@ pub enum ScrollMode {
     Fixed
 }
 
-struct Cursor {
-    x: u16,
-    y: u16,
+pub struct Cursor {
+    x: i32,
+    y: i32,
 }
 
 pub struct Pane {
@@ -34,11 +33,8 @@ pub struct Pane {
 
     scroll_mode: ScrollMode,
 
-    // Cached lines
-    lines: Vec<GlyphString>,
-
-    // virtual cursor location
-    cursor: Cursor,
+    // Viewable lines
+    view_port: ViewPort,
 
     // current print state
     print_state: PrintStyle,

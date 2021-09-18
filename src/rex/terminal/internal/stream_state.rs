@@ -208,7 +208,7 @@ mod tests {
         assert!(out.iter().all(|s| match s {
             CSI(_) => { true }
             _ => { false }
-        }), format!("not all of {:?} are CSIs!", &out));
+        }), "not all of {:?} are CSIs!", &out);
     }
 
     #[test]
@@ -218,6 +218,6 @@ mod tests {
         assert!(out.iter().all(|s| match s {
             CSI(_) => { true }
             _ => { false }
-        }), format!("not all of {:?} are CSIs!", &out));
+        }), "not all of {:?} are CSIs!", &out);
     }
 }

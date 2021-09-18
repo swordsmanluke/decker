@@ -3,13 +3,29 @@ use std::str::FromStr;
 use crate::rex::terminal::internal::VT100::{SGR, PassThrough, MoveCursor, EraseScreen, EraseLine, ClearLine, Unknown, ScrollDown, ScrollUp, MoveCursorApp};
 use anyhow::Error;
 use std::fmt::Debug;
+use crate::rex::terminal::internal::glyph_string::GlyphString;
+use crate::rex::terminal::{Cursor, ScrollMode};
+use crate::rex::terminal::pane::PrintStyle;
+
+pub mod glyph_string;
 
 mod stream_state;
-pub mod glyph_string;
+mod view_port;
+mod cursor;
 
 enum VT100State {
     PlainText,
     FoundEsc,
+}
+
+pub(crate) struct ViewPort {
+    garbage_line: GlyphString,  // dump non-visible text here
+    visible_lines: Vec<GlyphString>,
+    cur_style: PrintStyle,
+    scroll_mode: ScrollMode,
+    width: usize,
+    height: usize,
+    cursor: Cursor
 }
 
 /***

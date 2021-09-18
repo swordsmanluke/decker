@@ -1,14 +1,12 @@
-use crate::rex::terminal::internal::glyph_string::GlyphString;
 use regex::Regex;
-use crate::rex::terminal::internal::{StreamState, VT100};
+use crate::rex::terminal::internal::{StreamState, VT100, ViewPort};
 use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
-use std::cmp::{min, max};
 use std::io::Write;
 use log::{info, error};
 use anyhow::bail;
 use std::fmt::{Display, Formatter};
 use lazy_static::lazy_static;
-use crate::rex::terminal::{ScrollMode, Pane, Cursor};
+use crate::rex::terminal::{ScrollMode, Pane};
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
 pub enum Color {
@@ -39,39 +37,6 @@ pub struct PrintStyle {
     pub blink: bool,
     pub bold: bool,
     pub invert: bool,
-}
-
-impl Cursor {
-    pub fn set_x(&mut self, n: u16) {
-        self.x = n
-    }
-
-    pub fn set_y(&mut self, n: u16) {
-        self.y = n
-    }
-
-    pub fn incr_x(&mut self, offset: u16) {
-        self.set_x(self.x + offset)
-    }
-
-    pub fn incr_y(&mut self, offset: u16) {
-        self.set_y(self.y + offset)
-    }
-
-    pub fn decr_x(&mut self, offset: u16) {
-        self.set_x(self.x - offset)
-    }
-
-    pub fn decr_y(&mut self, offset: u16) {
-        self.set_y(self.y - offset)
-    }
-
-    pub fn new() -> Self {
-        Cursor {
-            x: 1, // screen is 1-indexed
-            y: 1,
-        }
-    }
 }
 
 impl Color {
@@ -300,7 +265,7 @@ impl PrintStyle {
 
 impl Pane {
     pub fn new(id: &str, x: u16, y: u16, height: u16, width: u16) -> Pane {
-        let lines = (0..height).map(|_| GlyphString::new()).collect::<Vec<GlyphString>>();
+        let view_port = ViewPort::new(width, height, ScrollMode::Fixed);
 
         Pane {
             id: String::from(id),
@@ -308,9 +273,8 @@ impl Pane {
             y,
             height,
             width,
-            lines,
+            view_port,
             scroll_mode: ScrollMode::Fixed,
-            cursor: Cursor::new(),
             print_state: PrintStyle::default(),
             stream_state: StreamState::new(),
         }
@@ -334,57 +298,22 @@ impl Pane {
                         match c {
                             '\u{8}' => {
                                 /* Backspace */
-                                let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
-                                if self.cursor.x > 1 {
-                                    self.cursor.decr_x(1);
-                                    line.clear_at((self.cursor.x - 1) as usize);
-                                }
+                                self.view_port.cursor_left(1);
+                                let idx = self.view_port.cursor().col() - 1;
+                                let line = self.view_port.cur_line();
+                                line.clear_at(idx as usize);
                             }
                             '\n' => {
-                                // Special char \n creates a new line.
-                                // Advance the cursor and reset to the start position.
-                                self.cursor.set_x(1);
-                                self.cursor.incr_y(1);
-
-                                // If we advance beyond the end of the pane bounds
-                                // check our scroll mode. If we're scrolling, discard
-                                // the topmost line of output and add a new line to the end.
-                                // If we are Fixed, just discard everything past this point
-                                if self.cursor.y >= self.height {
-                                    match self.scroll_mode {
-                                        ScrollMode::Scroll => {
-                                            info!("{}: Scrolling past bottom of screen. Pop the topmost line off the stack", self.id);
-                                            info!("{}: Popped '{:?}'", self.id, self.lines.remove(0));
-                                            self.cursor.set_y(self.height);
-                                            self.lines.push(GlyphString::new());
-                                            self.lines.iter_mut().for_each(|l| l.make_dirty());
-                                        }
-                                        ScrollMode::Fixed => {
-                                            info!("{}: Fixed mode - won't scroll to display", self.id)
-                                        }
-                                    }
-                                }
+                                self.view_port.newline();
                             }
                             '\t' => {
                                 // Replace tabs with 4 spaces
-                                let vert_line = self.cursor.y - 1;
-                                let line = match self.lines.get_mut(vert_line as usize){
-                                    None => {
-                                        while self.cursor.y as usize > self.lines.len() {
-                                            self.lines.push(GlyphString::new() );
-                                        }
-                                        self.lines.get_mut(vert_line as usize).unwrap()
-                                    }
-                                    Some(line) => { line }
-                                };
-                                for _ in 0..4 {
-                                    line.set((self.cursor.x - 1) as usize, ' ', &self.print_state);
-                                    self.cursor.incr_x(1);
-                                }
+                                let line = self.view_port.cur_line();
+                                line.push("    ", &line.last_style());
+                                self.view_port.cursor_right(4);
                             }
                             '\r' => {
-                                // Return to the start of this line!
-                                self.cursor.set_x(1);
+                                self.view_port.cursor_home();
                             }
                             '\x7F' => { /* Delete */ }
                             _ => {
@@ -392,17 +321,14 @@ impl Pane {
                                 match c as u8 {
                                     0x20..=0xFF => {
                                         // Visible characters
-                                        if self.scroll_mode == ScrollMode::Fixed && self.cursor.y >= self.height {
-                                            info!("{}: Ignoring output past end of viewable area", self.id)
-                                        } else {
-                                            let vert_line = self.cursor.y - 1;
-                                            let line = self.lines.get_mut(vert_line as usize).unwrap();
-                                            line.set((self.cursor.x - 1) as usize, c, &self.print_state);
-                                            self.cursor.incr_x(1);
-                                        }
+                                        let col = (self.view_port.cursor().col() - 1) as usize;
+                                        let line = self.view_port.cur_line();
+                                        line.set(col, c, &self.print_state);
+                                        self.view_port.cursor_right(1);
                                     }
                                     _ => {
                                         // Special chars that don't have fill
+                                        info!("main: Unhandled char: {:?}", c);
                                         print!("{}", c);
                                     }
                                 }
@@ -419,8 +345,8 @@ impl Pane {
                     info!("{}: Handling CSI: {:?}", self.id, vt100_code);
                     match vt100_code {
                         VT100::SGR(code) => { self.print_state.apply_vt100(&code)? }
-                        VT100::ScrollDown(_) => { self.cursor.incr_y(1); }
-                        VT100::ScrollUp(_) => { self.cursor.decr_y(1) }
+                        VT100::ScrollDown(_) => { self.view_port.cursor_up(1); }
+                        VT100::ScrollUp(_) => { self.view_port.cursor_down(1); }
                         VT100::MoveCursor(code) |
                         VT100::MoveCursorApp(code)=> {
                             /* cursor movement */
@@ -483,30 +409,13 @@ impl Pane {
         let x_off = self.x;
         let y_off = self.y;
         let width = self.width;
-        let height = self.height;
         let pane_id = self.id.as_str();
         let mut chunks: Vec<u8> = Vec::with_capacity(1024);
 
-        let scrollable_pane = self.scroll_mode == ScrollMode::Scroll;
-        let lines = if self.lines.len() >= height as usize {
-            if scrollable_pane {
-                let offset = self.lines.len() - height as usize;
-                self.lines[offset..].iter_mut()
-            } else {
-                self.lines[..height as usize].iter_mut()
-            }
-        } else {
-            self.lines.iter_mut()
-        };
-
-        lines.for_each(|line| {
+        self.view_port.take_visible_lines().iter_mut().for_each(|line| {
             if line.dirty() {
-                let within_frame = line_idx < height;
-
-                if within_frame || scrollable_pane {
-                    info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
-                    line.write(x_off, y_off + line_idx, width, &ps, &mut chunks).unwrap();
-                }
+                info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
+                line.write(x_off, y_off + line_idx, width, &ps, &mut chunks).unwrap();
             }
             line_idx += 1;
         });
@@ -521,45 +430,39 @@ impl Pane {
 
     pub fn take_cursor(&self, target: &mut dyn Write) -> anyhow::Result<()> {
         // put cursor where it belongs
-        let global_y = self.cursor.y + self.y - 1;
-        let global_x = self.cursor.x + self.x - 1;
-        info!("{}: Putting cursor at {}x{}y (global: {},{})", self.id, self.cursor.x, self.cursor.y, global_x, global_y);
+        let row = self.view_port.cursor().row();
+        let col = self.view_port.cursor().col();
+
+        let global_y = row + self.y - 1;
+        let global_x = col + self.x - 1;
+
+        info!("{}: Putting cursor at {}x{}y (global: {},{})", self.id, col, row, global_x, global_y);
         write!(target, "\x1b[{};{}H", global_y, global_x)?;
         Ok(())
     }
 
-    fn set_cursor_horz(&mut self, col: u16) {
-        self.cursor.set_x(max(1, min(col, self.width - 1)));
-    }
-
-    fn set_cursor_vert(&mut self, row: u16) {
-        self.cursor.set_y(max(1, min(row, self.height - 1)));
-    }
-
     fn delete_text(&mut self, vt100_code: &str) -> anyhow::Result<()> {
         let last_char = vt100_code.chars().last().unwrap();
+        let col = (self.view_port.cursor().col() - 1) as usize;
+        let line = self.view_port.cur_line();
+
         match last_char {
             'L' => {
                 /* Erase all characters before me, but don't truncate */
-                let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
-                line.clear_to(self.cursor.x as usize);
+                line.clear_to(col);
             }
             'K' => {
                 match Pane::deletion_type(vt100_code) {
                     None => {
                         /*Delete to end of line*/
-                        info!("{}: Clearing {}:{} -> {}", self.id, self.cursor.y - 1, self.cursor.x, self.width);
-                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
-                        line.clear_after(self.cursor.x as usize);
+                        line.clear_after(col);
                     }
                     Some(1) => {
                         /* Delete to start of line */
-                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
-                        line.delete_to(self.cursor.x as usize);
+                        line.delete_to(col );
                     }
                     Some(2) => {
                         /* Delete entire line*/
-                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
                         line.clear();
                     }
                     Some(i) => {
@@ -569,40 +472,41 @@ impl Pane {
                 }
             }
             'J' => {
+                let row = self.view_port.cursor().row();
+                let col = self.view_port.cursor().col();
+                let line = self.view_port.cur_line();
+
                 match Pane::deletion_type(vt100_code) {
                     None => {
                         /*Delete to end of screen*/
                         // Clear the current line
-                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
-                        line.clear_after(self.cursor.x as usize);
+                        line.clear_after((col - 1) as usize);
 
                         //... and then the remainder of the screen
-                        for line_idx in self.cursor.y..self.height {
-                            let line = self.lines.get_mut(line_idx as usize).unwrap();
+                        for line_idx in (row-1)..self.height {
+                            let line = self.view_port.mut_line(line_idx as usize);
                             line.clear();
                         }
                     }
                     Some(1) => {
                         /* Delete to start of screen */
                         // Clear the current line
-                        let line = self.lines.get_mut((self.cursor.y - 1) as usize).unwrap();
-                        line.clear_to(self.cursor.x as usize);
+                        line.clear_to((col - 1) as usize);
 
                         //... and then the top of the screen on down
-                        for line_idx in 0..self.cursor.y {
-                            let line = self.lines.get_mut(line_idx as usize).unwrap();
+                        for line_idx in 0..row {
+                            let line = self.view_port.mut_line(line_idx as usize);
                             line.clear();
                         }
                     }
                     Some(2) => {
                         /* Clear screen */
                         for line_idx in 0..self.height {
-                            let line = self.lines.get_mut(line_idx as usize).unwrap();
+                            let line = self.view_port.mut_line(line_idx as usize);
                             line.clear();
                         }
                         // Reset the cursor location
-                        self.cursor.x = 1;
-                        self.cursor.y = 1;
+                        self.view_port.cursor_goto(1, 1);
                     }
                     Some(i) => {
                         /*Invalid*/
@@ -630,25 +534,24 @@ impl Pane {
                     Some(m) => { m.as_str().to_owned().parse::<u16>().unwrap_or(0) }
                 };
 
-                self.set_cursor_horz(col);
-                self.set_cursor_vert(row);
+                self.view_port.cursor_goto(row, col);
             }
 
             'A' => {
                 let up = Pane::cursor_move_amount(vt100_code)?;
-                self.set_cursor_vert(self.cursor.y - up)
+                self.view_port.cursor_up(up)
             }
             'B' => {
                 let down = Pane::cursor_move_amount(vt100_code)?;
-                self.set_cursor_vert(self.cursor.y + down)
+                self.view_port.cursor_down(down)
             }
             'C' => {
                 let right = Pane::cursor_move_amount(vt100_code)?;
-                self.set_cursor_horz(self.cursor.x + right)
+                self.view_port.cursor_right(right)
             }
             'D' => {
                 let left = Pane::cursor_move_amount(vt100_code)?;
-                self.set_cursor_horz(self.cursor.x - left)
+                self.view_port.cursor_left(left)
             }
             /*****
             TODO: Save/Restore cursor states
@@ -680,8 +583,11 @@ impl Pane {
     }
 
     // A Handle for testing
-    fn plaintext(&self) -> String {
-        self.lines.iter().map(|l| l.to_str(&self.print_state).to_owned()).collect::<Vec<String>>().join("\n")
+    fn plaintext(&mut self) -> String {
+        let state = self.print_state;
+        self.view_port.take_visible_lines().iter().
+            map(|l| l.to_str(&state).to_owned()).
+            collect::<Vec<String>>().join("\n")
     }
 }
 
@@ -691,7 +597,7 @@ mod tests {
 
     #[test]
     fn it_displays_blank_space_on_creation() {
-        let pane = Pane::new("p1", 1, 1, 10, 20);
+        let mut pane = Pane::new("p1", 1, 1, 10, 20);
         assert_eq!("\n\n\n\n\n\n\n\n\n", pane.plaintext());
     }
 
@@ -701,111 +607,6 @@ mod tests {
         pane.push("a line of text").unwrap();
         assert_eq!("a line of text\n\n\n\n\n\n\n\n\n", pane.plaintext());
     }
-
-    #[test]
-    fn it_moves_the_cursor_horizontally_after_writing() {
-        let mut pane = Pane::new("p1", 1, 1, 10, 20);
-        pane.push("a line of text").unwrap();
-        assert_eq!(1, pane.cursor.y);
-        assert_eq!(15, pane.cursor.x);
-    }
-
-    #[test]
-    fn it_moves_the_cursor_vertically_after_newline() {
-        let mut pane = Pane::new("p1", 1, 1, 10, 20);
-        pane.push("two lines\nof text").unwrap();
-        assert_eq!(2, pane.cursor.y);
-        assert_eq!(8, pane.cursor.x);
-    }
-
-    /***
-    Cursor movement tests
-     */
-    #[test]
-    fn it_moves_the_cursor_using_vt100_codes() {
-        let mut pane = Pane::new("p1", 1, 1, 10, 20);
-        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
-
-        assert_eq!(5, pane.cursor.y);
-        assert_eq!(7, pane.cursor.x);
-    }
-
-    #[test]
-    fn it_moves_the_cursor_up_using_vt100_codes() {
-        let mut pane = Pane::new("p1", 1, 1, 10, 20);
-        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
-        pane.push("\x1b[2A").unwrap();
-        pane.push("\x1b[A").unwrap();
-        assert_eq!(2, pane.cursor.y);
-        assert_eq!(7, pane.cursor.x);
-    }
-
-    #[test]
-    fn it_moves_the_cursor_down_using_vt100_codes() {
-        let mut pane = Pane::new("p1", 1, 1, 10, 20);
-        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
-        pane.push("\x1b[2B").unwrap();
-        pane.push("\x1b[B").unwrap();
-        assert_eq!(8, pane.cursor.y);
-        assert_eq!(7, pane.cursor.x);
-    }
-
-    #[test]
-    fn it_moves_the_cursor_right_using_vt100_codes() {
-        let mut pane = Pane::new("p1", 1, 1, 10, 20);
-        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
-        pane.push("\x1b[2C").unwrap();
-        pane.push("\x1b[C").unwrap();
-        assert_eq!(5, pane.cursor.y);
-        assert_eq!(10, pane.cursor.x);
-    }
-
-    #[test]
-    fn it_moves_the_cursor_left_using_vt100_codes() {
-        let mut pane = Pane::new("p1", 1, 1, 10, 20);
-        pane.push("\x1b[5;7H").unwrap(); // Move to 5, 7
-        pane.push("\x1b[2D").unwrap();
-        pane.push("\x1b[D").unwrap();
-        assert_eq!(5, pane.cursor.y);
-        assert_eq!(4, pane.cursor.x);
-    }
-
-    #[test]
-    fn it_moves_the_cursor_and_still_prints_using_vt100_codes() {
-        let mut pane = Pane::new("p1", 1, 1, 10, 20);
-
-        // Initial state, let's have a box
-        //   AAAAA
-        //   BBBBB
-        //   CCCCC
-        //
-        // Then use cursor movements to set the top-left and top right to X, the center to O
-        // and the bottom to alternate COCOC
-
-        pane.push("AAAAA\nBBBBB\nCCCCC").unwrap();
-
-        pane.push("\x1b[H").unwrap(); // Home
-        pane.push("X").unwrap(); // X in top left
-        pane.push("\x1b[1;5H").unwrap();
-        pane.push("X").unwrap(); // X in top Right
-
-        // Should have XAAAX in the top row now and cursor is at 1,6
-        // Move down and left
-        pane.push("\x1b[B").unwrap(); // down one
-        pane.push("\x1b[3D").unwrap(); // left 3
-        pane.push("O").unwrap();
-
-        // Second row should now be BBOBB and cursor is at 1,4
-        // jump to the left and down one
-        pane.push("\x1b[3;1f").unwrap(); // row 3, col 1
-        pane.push("\x1b[1C").unwrap(); // right one
-        pane.push("_").unwrap();
-        pane.push("\x1b[C").unwrap(); // right one
-        pane.push("_").unwrap();
-
-        assert_eq!("XAAAX\nBBOBB\nC_C_C\n\n\n\n\n\n\n", pane.plaintext());
-    }
-
 
     /***
     PrintState Tests
