@@ -11,6 +11,7 @@ use std::io::{Read, Write};
 use std::process::Command;
 use anyhow::anyhow;
 use std::sync::{Arc, RwLock};
+use termion::raw::IntoRawMode;
 
 impl ProcessOrchestrator {
     /***
@@ -24,6 +25,8 @@ impl ProcessOrchestrator {
             pixel_width: 0,
             pixel_height: 0,
         }).unwrap();
+
+        pty.master.try_clone_writer().unwrap().into_raw_mode().unwrap();
 
         ProcessOrchestrator {
             tasks: HashMap::new(),
