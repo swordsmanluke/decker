@@ -1,7 +1,6 @@
 use crate::rex::terminal::internal::ViewPort;
 use crate::rex::terminal::internal::glyph_string::GlyphString;
-use crate::rex::terminal::pane::PrintStyle;
-use crate::rex::terminal::{Cursor, ScrollMode};
+use crate::rex::terminal::{Cursor, ScrollMode, PrintStyle};
 
 impl ViewPort {
     pub fn new(width: u16, height: u16, scroll_mode: ScrollMode) -> Self {

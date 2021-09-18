@@ -4,8 +4,7 @@ use crate::rex::terminal::internal::VT100::{SGR, PassThrough, MoveCursor, EraseS
 use anyhow::Error;
 use std::fmt::Debug;
 use crate::rex::terminal::internal::glyph_string::GlyphString;
-use crate::rex::terminal::{Cursor, ScrollMode};
-use crate::rex::terminal::pane::PrintStyle;
+use crate::rex::terminal::{Cursor, ScrollMode, PrintStyle};
 
 pub mod glyph_string;
 

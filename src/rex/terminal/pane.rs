@@ -6,37 +6,12 @@ use log::{info, error};
 use anyhow::bail;
 use std::fmt::{Display, Formatter};
 use lazy_static::lazy_static;
-use crate::rex::terminal::{ScrollMode, Pane};
-
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-pub enum Color {
-    Black,
-    Red,
-    Green,
-    Yellow,
-    Blue,
-    Magenta,
-    Cyan,
-    White,
-    TWOFIFTYSIX(u8),
-    RGB(u8, u8, u8),
-}
+use crate::rex::terminal::{ScrollMode, Pane, Color, PrintStyle};
 
 impl Display for Color {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(format!("{:?}", self).as_str())
     }
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub struct PrintStyle {
-    pub foreground: Color,
-    pub background: Color,
-    pub italicized: bool,
-    pub underline: bool,
-    pub blink: bool,
-    pub bold: bool,
-    pub invert: bool,
 }
 
 impl Color {

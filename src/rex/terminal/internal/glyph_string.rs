@@ -1,8 +1,8 @@
 use std::cmp::{max, min};
-use crate::rex::terminal::pane::PrintStyle;
 use std::io::Write;
 use log::{debug};
 use std::fmt::{Debug, Formatter};
+use crate::rex::terminal::PrintStyle;
 
 #[derive(Clone)]
 pub struct GlyphString {
