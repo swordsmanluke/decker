@@ -74,7 +74,7 @@ impl MasterControl {
     pub fn activate_proc(&mut self, task_id: &TaskId, pane: &Pane) -> anyhow::Result<()> {
         // TODO: Finish wiring this up.
         //  Probably need to track tasks within ProcessOrchestrator again
-        let resize_task = ResizeTask { task_id: task_id.clone(), size: Some((pane.width, pane.height)) };
+        let resize_task = ResizeTask { task_id: task_id.clone(), size: Some((pane.width(), pane.height())) };
         self.send_command("resize", &serde_json::to_string(&resize_task)?)?;
         self.await_response("resize")?;
 

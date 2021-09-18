@@ -15,6 +15,27 @@ impl ViewPort {
         }
     }
 
+    pub fn width(&self) -> u16 {
+        self.width as u16
+    }
+
+    pub fn height(&self) -> u16 {
+        self.height as u16
+    }
+
+    pub fn set_scroll_mode(&mut self, mode: ScrollMode) {
+        self.scroll_mode = mode
+    }
+
+    pub fn style(&self) -> PrintStyle {
+        self.cur_style
+    }
+
+    pub fn apply_style(&mut self, vt100: &str) -> anyhow::Result<()> {
+        self.cur_style.apply_vt100(vt100)?;
+        Ok(())
+    }
+
     pub fn take_visible_lines(&mut self) -> &mut Vec<GlyphString> {
         if self.visible_lines.len() > self.height {
             match self.scroll_mode {

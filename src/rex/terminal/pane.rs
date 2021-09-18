@@ -246,17 +246,21 @@ impl Pane {
             id: String::from(id),
             x,
             y,
-            height,
-            width,
             view_port,
-            scroll_mode: ScrollMode::Fixed,
-            print_state: PrintStyle::default(),
             stream_state: StreamState::new(),
         }
     }
 
+    pub fn width(&self) -> u16 {
+        self.view_port.width()
+    }
+
+    pub fn height(&self) -> u16 {
+        self.view_port.height()
+    }
+
     pub fn set_scroll_mode(&mut self, mode: ScrollMode) {
-        self.scroll_mode = mode;
+        self.view_port.set_scroll_mode(mode);
     }
 
     pub fn push(&mut self, s: &str) -> anyhow::Result<()> {
@@ -297,8 +301,9 @@ impl Pane {
                                     0x20..=0xFF => {
                                         // Visible characters
                                         let col = (self.view_port.cursor().col() - 1) as usize;
+                                        let style = self.view_port.style();
                                         let line = self.view_port.cur_line();
-                                        line.set(col, c, &self.print_state);
+                                        line.set(col, c, &style);
                                         self.view_port.cursor_right(1);
                                     }
                                     _ => {
@@ -319,7 +324,7 @@ impl Pane {
                     // 4) Print to the terminal as if it were plaintext
                     info!("{}: Handling CSI: {:?}", self.id, vt100_code);
                     match vt100_code {
-                        VT100::SGR(code) => { self.print_state.apply_vt100(&code)? }
+                        VT100::SGR(code) => { self.view_port.apply_style(&code)? }
                         VT100::ScrollDown(_) => { self.view_port.cursor_up(1); }
                         VT100::ScrollUp(_) => { self.view_port.cursor_down(1); }
                         VT100::MoveCursor(code) |
@@ -379,11 +384,11 @@ impl Pane {
     pub fn write(&mut self, target: &mut dyn Write) -> anyhow::Result<()> {
         let mut line_idx = 0;
 
-        let ps = self.print_state.clone();
+        let ps = self.view_port.style().clone();
         // Values cloned to avoid having immutable references inside a mutable reference to self
         let x_off = self.x;
         let y_off = self.y;
-        let width = self.width;
+        let width = self.width();
         let pane_id = self.id.as_str();
         let mut chunks: Vec<u8> = Vec::with_capacity(1024);
 
@@ -408,7 +413,7 @@ impl Pane {
         let row = self.view_port.cursor().row();
         let col = self.view_port.cursor().col();
 
-        let global_y = row + self.y - 1;
+        let global_y = row + self.y;
         let global_x = col + self.x - 1;
 
         info!("{}: Putting cursor at {}x{}y (global: {},{})", self.id, col, row, global_x, global_y);
@@ -458,7 +463,7 @@ impl Pane {
                         line.clear_after((col - 1) as usize);
 
                         //... and then the remainder of the screen
-                        for line_idx in (row-1)..self.height {
+                        for line_idx in (row-1)..self.height() {
                             let line = self.view_port.mut_line(line_idx as usize);
                             line.clear();
                         }
@@ -476,7 +481,7 @@ impl Pane {
                     }
                     Some(2) => {
                         /* Clear screen */
-                        for line_idx in 0..self.height {
+                        for line_idx in 0..self.height() {
                             let line = self.view_port.mut_line(line_idx as usize);
                             line.clear();
                         }
@@ -559,7 +564,7 @@ impl Pane {
 
     // A Handle for testing
     fn plaintext(&mut self) -> String {
-        let state = self.print_state;
+        let state = self.view_port.style();
         self.view_port.take_visible_lines().iter().
             map(|l| l.to_str(&state).to_owned()).
             collect::<Vec<String>>().join("\n")

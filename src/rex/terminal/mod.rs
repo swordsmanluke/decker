@@ -53,16 +53,9 @@ pub struct Pane {
     // Location and Dimensions
     pub x: u16,
     pub y: u16,
-    pub height: u16,
-    pub width: u16,
 
-    scroll_mode: ScrollMode,
-
-    // Viewable lines
+    // Viewable area
     view_port: ViewPort,
-
-    // current print state
-    print_state: PrintStyle,
 
     // Input buffer
     stream_state: StreamState,
