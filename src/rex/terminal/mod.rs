@@ -43,6 +43,17 @@ pub enum ScrollMode {
     Fixed
 }
 
+#[derive(Debug)]
+pub enum DeletionType {
+    ClearLine,
+    ClearLineToCursor,
+    ClearLineAfterCursor,
+    ClearScreen,
+    ClearScreenToCursor,
+    ClearScreenAfterCursor,
+    Unknown(String)
+}
+
 pub struct Cursor {
     x: i32,
     y: i32,

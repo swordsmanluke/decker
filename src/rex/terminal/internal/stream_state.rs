@@ -6,9 +6,10 @@ use lazy_static::lazy_static;
 use std::str::FromStr;
 
 lazy_static! {
-    static ref CSI_BEGINNING: Regex = Regex::new(r"\x1b[\[\x9b>=MD]").unwrap();
+    static ref CSI_BEGINNING: Regex = Regex::new(r"\x1b[\[\x9b>=MDk]").unwrap();
     static ref VT100_REGEX:  Regex = Regex::new(r"\x1b[\[\x9b>=MD]([0-?]*[ -/]*[@-~>=])").unwrap();
     static ref VT100_SCROLL_REGEX: Regex = Regex::new(r"\x1b[MD]").unwrap();
+    static ref VT100_CLEAR_REGEX: Regex = Regex::new(r"\x1bk\S+").unwrap();
 }
 
 impl StreamState {
@@ -77,6 +78,7 @@ impl StreamState {
     fn is_esc_seq_complete(&self) -> bool {
         self.is_esc_seq() && (
             VT100_REGEX.is_match(&self.buffer) ||
+            VT100_CLEAR_REGEX.is_match(&self.buffer) ||
             VT100_SCROLL_REGEX.is_match(&self.buffer))
     }
 

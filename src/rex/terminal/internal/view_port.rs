@@ -1,10 +1,12 @@
 use crate::rex::terminal::internal::ViewPort;
 use crate::rex::terminal::internal::glyph_string::GlyphString;
-use crate::rex::terminal::{Cursor, ScrollMode, PrintStyle};
+use crate::rex::terminal::{Cursor, ScrollMode, PrintStyle, DeletionType};
+use log::{info, warn};
 
 impl ViewPort {
-    pub fn new(width: u16, height: u16, scroll_mode: ScrollMode) -> Self {
+    pub fn new(pane_id: String, width: u16, height: u16, scroll_mode: ScrollMode) -> Self {
         ViewPort {
+            pane_id,
             garbage_line: GlyphString::new(),
             visible_lines: Vec::with_capacity(height as usize),
             cur_style: PrintStyle::default(),
@@ -34,6 +36,38 @@ impl ViewPort {
     pub fn apply_style(&mut self, vt100: &str) -> anyhow::Result<()> {
         self.cur_style.apply_vt100(vt100)?;
         Ok(())
+    }
+
+    pub(crate) fn clear(&mut self, deletion_type: DeletionType) {
+        let row = (self.cursor().row() - 1) as usize;
+        let col = (self.cursor().col() - 1) as usize;
+
+        info!("{}: CSI deletion: {:?}",self.pane_id, deletion_type);
+
+        match deletion_type {
+            DeletionType::ClearLine => { self.cur_line().clear(); }
+            DeletionType::ClearLineToCursor => { self.cur_line().clear_to(col); }
+            DeletionType::ClearLineAfterCursor => { self.cur_line().clear_after(col); }
+            DeletionType::ClearScreen => {
+                self.visible_lines.iter_mut().for_each(|l| l.clear());
+                self.cursor_goto(1, 1);
+            }
+            DeletionType::ClearScreenToCursor => {
+                // Clear all the lines before us
+                self.visible_lines[..row].iter_mut().for_each(|l| l.clear());
+                // and our line
+                self.cur_line().clear_to(col);
+            }
+            DeletionType::ClearScreenAfterCursor => {
+                // Clear all the lines after us
+                self.visible_lines[row+1..].iter_mut().for_each(|l| l.clear());
+                // and our line
+                self.cur_line().clear_after(col);
+            }
+            DeletionType::Unknown(vt100_code) => {
+                warn!("{}: Unknown vt100 deletion string: {}", self.pane_id, vt100_code)
+            }
+        }
     }
 
     pub fn take_visible_lines(&mut self) -> &mut Vec<GlyphString> {

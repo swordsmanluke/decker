@@ -151,8 +151,7 @@ impl ProcessOrchestrator {
                 info!("main: Read {} bytes", size);
                 if size > 0 {
                     let output = String::from_utf8(output[..size].to_owned()).unwrap();
-                    info!("main: Sending {:?} to MCP", output);
-                    sender.send(ProcOutput { name: pane.clone(), output }).unwrap();
+                    sender.send(ProcOutput {    name: pane.clone(), output }).unwrap();
                 }
             }
         });

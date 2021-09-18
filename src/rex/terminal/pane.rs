@@ -2,11 +2,11 @@ use regex::Regex;
 use crate::rex::terminal::internal::{StreamState, VT100, ViewPort};
 use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
 use std::io::Write;
-use log::{info, error};
+use log::{info};
 use anyhow::bail;
 use std::fmt::{Display, Formatter};
 use lazy_static::lazy_static;
-use crate::rex::terminal::{ScrollMode, Pane, Color, PrintStyle};
+use crate::rex::terminal::{ScrollMode, Pane, Color, PrintStyle, DeletionType};
 
 impl Display for Color {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -240,7 +240,7 @@ impl PrintStyle {
 
 impl Pane {
     pub fn new(id: &str, x: u16, y: u16, height: u16, width: u16) -> Pane {
-        let view_port = ViewPort::new(width, height, ScrollMode::Fixed);
+        let view_port = ViewPort::new(id.to_string(), width, height, ScrollMode::Fixed);
 
         Pane {
             id: String::from(id),
@@ -423,79 +423,35 @@ impl Pane {
 
     fn delete_text(&mut self, vt100_code: &str) -> anyhow::Result<()> {
         let last_char = vt100_code.chars().last().unwrap();
-        let col = (self.view_port.cursor().col() - 1) as usize;
-        let line = self.view_port.cur_line();
 
-        match last_char {
-            'L' => {
-                /* Erase all characters before me, but don't truncate */
-                line.clear_to(col);
-            }
+        let deletion_type = match last_char {
+            'L' => DeletionType::ClearLineToCursor,
             'K' => {
                 match Pane::deletion_type(vt100_code) {
-                    None => {
-                        /*Delete to end of line*/
-                        line.clear_after(col);
-                    }
-                    Some(1) => {
-                        /* Delete to start of line */
-                        line.delete_to(col );
-                    }
-                    Some(2) => {
-                        /* Delete entire line*/
-                        line.clear();
-                    }
-                    Some(i) => {
-                        /*Invalid*/
-                        error!("Unknown 'line delete' type '{}'. Ignoring!", i)
-                    }
-                }
-            }
+                    None => DeletionType::ClearLineAfterCursor,
+                    Some(1) => DeletionType::ClearLineToCursor,
+                    Some(2) => DeletionType::ClearLine,
+                    _ => DeletionType::Unknown(vt100_code.to_string())
+                }},
             'J' => {
-                let row = self.view_port.cursor().row();
-                let col = self.view_port.cursor().col();
-                let line = self.view_port.cur_line();
-
                 match Pane::deletion_type(vt100_code) {
-                    None => {
-                        /*Delete to end of screen*/
-                        // Clear the current line
-                        line.clear_after((col - 1) as usize);
-
-                        //... and then the remainder of the screen
-                        for line_idx in (row-1)..self.height() {
-                            let line = self.view_port.mut_line(line_idx as usize);
-                            line.clear();
-                        }
-                    }
-                    Some(1) => {
-                        /* Delete to start of screen */
-                        // Clear the current line
-                        line.clear_to((col - 1) as usize);
-
-                        //... and then the top of the screen on down
-                        for line_idx in 0..row {
-                            let line = self.view_port.mut_line(line_idx as usize);
-                            line.clear();
-                        }
-                    }
-                    Some(2) => {
-                        /* Clear screen */
-                        for line_idx in 0..self.height() {
-                            let line = self.view_port.mut_line(line_idx as usize);
-                            line.clear();
-                        }
-                        // Reset the cursor location
-                        self.view_port.cursor_goto(1, 1);
-                    }
-                    Some(i) => {
-                        /*Invalid*/
-                        error!("Unknown 'screen delete' type '{}'. Ignoring!", i)
-                    }
+                    None => DeletionType::ClearScreenAfterCursor,
+                    Some(1) => DeletionType::ClearScreenToCursor,
+                    Some(2) => DeletionType::ClearScreen,
+                    _ => DeletionType::Unknown(vt100_code.to_string())
                 }
             }
-            _ => { /* Not a text deletion */ }
-        }
+            _ => {
+                /* Should be a 'k' string */
+                match &vt100_code[0..2] {
+                    "\x1Bk" => DeletionType::ClearLineAfterCursor,
+                    _ => DeletionType::Unknown(vt100_code.to_string())
+                }
+            }
+        };
+
+        self.view_port.clear(deletion_type);
+
         Ok(())
     }
 

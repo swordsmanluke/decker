@@ -18,6 +18,7 @@ enum VT100State {
 }
 
 pub(crate) struct ViewPort {
+    pane_id: String,
     garbage_line: GlyphString,  // dump non-visible text here
     visible_lines: Vec<GlyphString>,
     cur_style: PrintStyle,
@@ -106,7 +107,13 @@ impl FromStr for VT100 {
             'K' => EraseLine(s.to_string()),
             'L' => ClearLine(s.to_string()),
             'h' | 'l' | 'n' | 'r' => PassThrough(s.to_string()),
-            _ => Unknown(s.to_string())
+            _ => {
+                if s[0..2] == *"\x1Bk" {
+                    EraseLine(s.to_string())
+                } else {
+                    Unknown(s.to_string())
+                }
+            }
         };
 
         Ok(vt100)
