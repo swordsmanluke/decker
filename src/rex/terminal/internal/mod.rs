@@ -1,6 +1,6 @@
 use crate::rex::terminal::internal::TerminalOutput::{CSI, Plaintext};
 use std::str::FromStr;
-use crate::rex::terminal::internal::VT100::{SGR, PassThrough, MoveCursor, EraseScreen, EraseLine, ClearLine, Unknown, ScrollDown, ScrollUp, MoveCursorApp};
+use crate::rex::terminal::internal::VT100::{SGR, PassThrough, MoveCursor, EraseScreen, EraseLine, ClearLine, Unknown, ScrollDown, ScrollUp, MoveCursorApp, HideCursor, ShowCursor, GetCursorPos, EnterAltKeypadMode, ExitAltKeypadMode};
 use anyhow::Error;
 use std::fmt::Debug;
 use crate::rex::terminal::internal::glyph_string::GlyphString;
@@ -19,13 +19,14 @@ enum VT100State {
 
 pub(crate) struct ViewPort {
     pane_id: String,
-    garbage_line: GlyphString,  // dump non-visible text here
+    garbage_line: GlyphString,
+    // dump non-visible text here
     visible_lines: Vec<GlyphString>,
     cur_style: PrintStyle,
     scroll_mode: ScrollMode,
     width: usize,
     height: usize,
-    cursor: Cursor
+    cursor: Cursor,
 }
 
 /***
@@ -53,23 +54,33 @@ pub enum VT100 {
     EraseLine(String),
     EraseScreen(String),
     PassThrough(String),
-    Unknown(String)
+    HideCursor(String),
+    ShowCursor(String),
+    GetCursorPos(String),
+    EnterAltKeypadMode(String),
+    ExitAltKeypadMode(String),
+    Unknown(String),
 }
 
 impl VT100 {
     pub fn to_string(&self) -> String {
-       match self {
-           ScrollDown(s) => { s.clone() }
-           ScrollUp(s) => { s.clone() }
-           SGR(s) => { s.clone() }
-           MoveCursor(s) => { s.clone() }
-           MoveCursorApp(s) => { s.clone() }
-           ClearLine(s) => { s.clone() }
-           EraseLine(s) => { s.clone() }
-           EraseScreen(s) => { s.clone() }
-           PassThrough(s) => { s.clone() }
-           Unknown(s) => { s.clone() }
-       }
+        match self {
+            ScrollDown(s) => { s.clone() }
+            ScrollUp(s) => { s.clone() }
+            SGR(s) => { s.clone() }
+            MoveCursor(s) => { s.clone() }
+            MoveCursorApp(s) => { s.clone() }
+            ClearLine(s) => { s.clone() }
+            EraseLine(s) => { s.clone() }
+            EraseScreen(s) => { s.clone() }
+            HideCursor(s) => { s.clone() }
+            ShowCursor(s) => { s.clone() }
+            PassThrough(s) => { s.clone() }
+            GetCursorPos(s) => { s.clone() }
+            Unknown(s) => { s.clone() }
+            EnterAltKeypadMode(s) => { s.clone() }
+            ExitAltKeypadMode(s) => { s.clone() }
+        }
     }
 }
 
@@ -78,7 +89,7 @@ impl FromStr for VT100 {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Err(anyhow::anyhow!("Cannot parse an empty string"))
+            return Err(anyhow::anyhow!("Cannot parse an empty string"));
         }
 
         let vt100 = match s.chars().last().unwrap() {
@@ -93,7 +104,7 @@ impl FromStr for VT100 {
                 }
             }
             'm' => SGR(s.to_string()),
-            'H' | 'f' | 'A' | 'B' | 'C'  => {
+            'H' | 'f' | 'A' | 'B' | 'C' => {
                 /* cursor movement */
                 if s.get(1..2).unwrap() == "O" {
                     // When alternate mode is set, arrow keys send ESC O[A-D] instead of ESC[[A-D]
@@ -106,7 +117,13 @@ impl FromStr for VT100 {
             'J' => EraseScreen(s.to_string()),
             'K' => EraseLine(s.to_string()),
             'L' => ClearLine(s.to_string()),
-            'h' | 'l' | 'n' | 'r' => PassThrough(s.to_string()),
+            'h' | 'l' | 'n' | 'r' => /* Various control / query options */
+                match s {
+                    "\x1b[?25l" => HideCursor(s.to_string()),
+                    "\x1b[?25h" => ShowCursor(s.to_string()),
+                    "\x1b[6n" => GetCursorPos(s.to_string()),
+                    _ => PassThrough(s.to_string())
+                }
             _ => {
                 if s[0..2] == *"\x1Bk" {
                     EraseLine(s.to_string())

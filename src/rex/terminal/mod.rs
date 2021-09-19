@@ -57,6 +57,8 @@ pub enum DeletionType {
 pub struct Cursor {
     x: i32,
     y: i32,
+    x_max: i32,
+    y_max: i32
 }
 
 pub struct Pane {

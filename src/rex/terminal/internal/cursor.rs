@@ -1,5 +1,6 @@
 use crate::rex::terminal::Cursor;
-use std::cmp::max;
+use std::cmp::{max, min};
+use log::info;
 
 impl Cursor {
     pub fn col(&self) -> u16 {
@@ -11,11 +12,11 @@ impl Cursor {
     }
 
     pub fn set_x(&mut self, n: i32) {
-        self.x = max(1, n)
+        self.x = min(max(1, n), self.x_max);
     }
 
     pub fn set_y(&mut self, n: i32) {
-        self.y = max(1, n)
+        self.y = min(max(1, n), self.y_max)
     }
 
     pub fn incr_x(&mut self, offset: u16) {
@@ -30,10 +31,12 @@ impl Cursor {
 
     pub fn decr_y(&mut self, offset: u16) { self.set_y(self.y - offset as i32) }
 
-    pub fn new() -> Self {
+    pub fn new(max_width: u16, max_height: u16) -> Self {
         Cursor {
             x: 1, // screen is 1-indexed
             y: 1,
+            x_max: max_width as i32,
+            y_max: max_height as i32
         }
     }
 }

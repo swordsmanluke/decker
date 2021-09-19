@@ -90,7 +90,7 @@ fn run_input_forwarding_loop(stdin: &mut AsyncReader, input_tx: Sender<String>, 
         // Strings _all the damn time_ for no reason. So instead.... just read one
         // byte at a time. /shrug
         if let Ok(_) = stdin.read_exact(&mut buffer[..1]) {
-            info!("main: Sending input: {:?}", buffer);
+            info!("main: Sending input: {}", buffer[0] as char);
             if buffer[0] == 3 { // Ctrl-C
                 if !mcp.running().unwrap() {
                     info!("main: ^C means shutdown!");

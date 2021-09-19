@@ -1,6 +1,6 @@
 use std::cmp::{max, min};
 use std::io::Write;
-use log::{debug};
+use log::{debug, info};
 use std::fmt::{Debug, Formatter};
 use crate::rex::terminal::PrintStyle;
 
@@ -96,9 +96,11 @@ impl GlyphString {
     }
 
     pub fn clear_after(&mut self, idx: usize) {
+        info!("main: CSI ClearAfter({}). Before: \"{:?}\"", idx, self);
         for i in idx..self.len() {
             self.clear_at(i);
         }
+        info!("main: CSI ClearAfter({}). After : \"{:?}\"", idx, self);
     }
 
     pub fn clear(&mut self) {
@@ -296,4 +298,5 @@ mod tests {
 
         assert_eq!(g.to_str(&ps), "a line        ");
     }
+
 }

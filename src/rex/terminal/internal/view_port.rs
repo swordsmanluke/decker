@@ -13,7 +13,7 @@ impl ViewPort {
             scroll_mode,
             width: width as usize,
             height: height as usize,
-            cursor: Cursor::new(),
+            cursor: Cursor::new(width, height),
         }
     }
 
@@ -139,7 +139,16 @@ impl ViewPort {
     }
 
     pub fn cursor_down(&mut self, amount: u16) {
-        self.cursor.incr_y(amount)
+        let final_row = amount + self.cursor.row();
+        self.cursor.incr_y(amount);
+
+        // If we are scrolling past the bottom row, scroll the base up.
+        // TODO: This is for SCROLL, but not for FIXED panes
+        if final_row >= self.height() {
+            (self.height()..final_row).for_each(|_| {
+                self.visible_lines.remove(0);
+            });
+        }
     }
 
     pub fn cursor_left(&mut self, amount: u16) {
@@ -152,5 +161,9 @@ impl ViewPort {
 
     pub fn cursor_home(&mut self) {
         self.cursor.set_x(1)
+    }
+
+    pub fn cursor_loc(&self) -> (u16, u16) {
+        (self.cursor.col(), self.cursor.row())
     }
 }

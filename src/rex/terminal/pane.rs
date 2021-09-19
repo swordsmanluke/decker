@@ -269,6 +269,7 @@ impl Pane {
         for out in self.stream_state.consume() {
             match out {
                 Plaintext(plain) => {
+                    info!("{}: Processing TXT {:?} {:?}", self.id, self.view_port.cursor_loc(), plain);
                     if plain.contains("\x1B") {
                         info!("{}: plaintext contains ESC! {:?}", self.id, plain);
                     }
@@ -278,11 +279,12 @@ impl Pane {
                             '\u{8}' => {
                                 /* Backspace */
                                 self.view_port.cursor_left(1);
-                                let idx = self.view_port.cursor().col() - 1;
-                                let line = self.view_port.cur_line();
-                                line.clear_at(idx as usize);
+                                // let idx = self.view_port.cursor().col() - 1;
+                                // let line = self.view_port.cur_line();
+                                // // line.clear_at(idx as usize);
                             }
                             '\n' => {
+                                info!("main: New line for \\n");
                                 self.view_port.newline();
                             }
                             '\t' => {
@@ -308,7 +310,7 @@ impl Pane {
                                     }
                                     _ => {
                                         // Special chars that don't have fill
-                                        info!("main: Unhandled char: {:?}", c);
+                                        info!("main: Unhandled char: {:?}({})", c, c as u8);
                                         print!("{}", c);
                                     }
                                 }
@@ -317,12 +319,7 @@ impl Pane {
                     }
                 }
                 CSI(vt100_code) => {
-                    // Determine the type of escape sequence and either
-                    // 1) Update the print state
-                    // 2) Move the cursor
-                    // 3) Clear some text
-                    // 4) Print to the terminal as if it were plaintext
-                    info!("{}: Handling CSI: {:?}", self.id, vt100_code);
+                    info!("{}: Processing CSI {:?}: {:?}", self.id, self.view_port.cursor_loc(), vt100_code);
                     match vt100_code {
                         VT100::SGR(code) => { self.view_port.apply_style(&code)? }
                         VT100::ScrollDown(_) => { self.view_port.cursor_up(1); }
@@ -338,6 +335,11 @@ impl Pane {
                             /* text deletion */
                             self.delete_text(&code)?
                         }
+                        VT100::HideCursor(code) => { print!("{}", code) }
+                        VT100::ShowCursor(code) => { print!("{}", code) }
+                        VT100::GetCursorPos(code) => { print!("{}", code) }
+                        VT100::EnterAltKeypadMode(code) => { print!("{}", code) }
+                        VT100::ExitAltKeypadMode(code) => { print!("{}", code) }
                         VT100::PassThrough(code) => {
                             /* Loads of control options */
                             match code.as_str() {
@@ -346,8 +348,6 @@ impl Pane {
                                 // it shouldn't matter.
                                 "\x1b[?2004h" | /* Bracketed paste mode ON */
                                 "\x1b[?2004l" | /* Bracketed paste mode OFF */
-                                "\x1b[?25l" | /* hide cursor */
-                                "\x1b[?25h" | /* show cursor */
                                 "\x1b[?34h"      /* underline cursor */
                                 => {
                                     // All of these can be managed by the
@@ -377,6 +377,8 @@ impl Pane {
                 }
             }
         }
+
+        info!("{}: Processing line ({}): \"{:?}\"", self.id, self.view_port.cursor().row(), self.view_port.cur_line());
 
         Ok(())
     }

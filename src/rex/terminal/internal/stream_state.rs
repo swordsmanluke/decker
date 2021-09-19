@@ -9,7 +9,7 @@ lazy_static! {
     static ref CSI_BEGINNING: Regex = Regex::new(r"\x1b[\[\x9b>=MDk]").unwrap();
     static ref VT100_REGEX:  Regex = Regex::new(r"\x1b[\[\x9b>=MD]([0-?]*[ -/]*[@-~>=])").unwrap();
     static ref VT100_SCROLL_REGEX: Regex = Regex::new(r"\x1b[MD]").unwrap();
-    static ref VT100_CLEAR_REGEX: Regex = Regex::new(r"\x1bk\S+").unwrap();
+    static ref VT100_CLEAR_REGEX: Regex = Regex::new(r"\x1bk\S+\\").unwrap();
 }
 
 impl StreamState {
