@@ -4,14 +4,14 @@ use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::{IntoRawMode, RawTerminal};
 use std::thread;
-use crate::rex::{MasterControl, TaskId, ProcessOrchestrator, ProcOutput};
-use crate::rex::terminal::{Pane, PaneManager, ScrollMode};
-use crate::rex::config::load_task_config;
+use crate::decker::{MasterControl, TaskId, ProcessOrchestrator, ProcOutput};
+use crate::decker::terminal::{Pane, PaneManager, ScrollMode};
+use crate::decker::config::load_task_config;
 use std::time::{SystemTime, Duration};
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 use termion::AsyncReader;
 
-mod rex;
+mod decker;
 
 fn run() -> anyhow::Result<()> {
     init_logging()?;
@@ -90,7 +90,7 @@ fn run_input_forwarding_loop(stdin: &mut AsyncReader, input_tx: Sender<String>, 
         // Strings _all the damn time_ for no reason. So instead.... just read one
         // byte at a time. /shrug
         if let Ok(_) = stdin.read_exact(&mut buffer[..1]) {
-            info!("main: Sending input: {}", buffer[0] as char);
+            info!("main: Processing input: '{}'", buffer[0] as char);
             if buffer[0] == 3 { // Ctrl-C
                 if !mcp.running().unwrap() {
                     info!("main: ^C means shutdown!");

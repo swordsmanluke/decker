@@ -1,5 +1,5 @@
 [package]
-name = "rex"
+name = "decker"
 version = "0.1.0"
 authors = ["Lucas Taylor <lucas@perfectlunacy.com>"]
 edition = "2018"

@@ -1,11 +1,11 @@
-use crate::rex::{MasterControl, Task, TaskId};
+use crate::decker::{MasterControl, Task, TaskId};
 use log::{info, warn};
 use std::time::Duration;
 use std::ops::Deref;
 use simple_error::bail;
 use serde::{Serialize, Deserialize};
 use crossbeam_channel::{Sender, Receiver};
-use crate::rex::terminal::Pane;
+use crate::decker::terminal::Pane;
 
 pub type PaneSize = Option<(u16, u16)>;
 

@@ -1,10 +1,10 @@
-use crate::rex::terminal::internal::TerminalOutput::{CSI, Plaintext};
+use crate::decker::terminal::internal::TerminalOutput::{CSI, Plaintext};
 use std::str::FromStr;
-use crate::rex::terminal::internal::VT100::{SGR, PassThrough, MoveCursor, EraseScreen, EraseLine, ClearLine, Unknown, ScrollDown, ScrollUp, MoveCursorApp, HideCursor, ShowCursor, GetCursorPos, EnterAltKeypadMode, ExitAltKeypadMode};
+use crate::decker::terminal::internal::VT100::{SGR, PassThrough, MoveCursor, EraseScreen, EraseLine, ClearLine, Unknown, ScrollDown, ScrollUp, MoveCursorApp, HideCursor, ShowCursor, GetCursorPos, EnterAltKeypadMode, ExitAltKeypadMode};
 use anyhow::Error;
 use std::fmt::Debug;
-use crate::rex::terminal::internal::glyph_string::GlyphString;
-use crate::rex::terminal::{Cursor, ScrollMode, PrintStyle};
+use crate::decker::terminal::internal::glyph_string::GlyphString;
+use crate::decker::terminal::{Cursor, ScrollMode, PrintStyle};
 
 pub mod glyph_string;
 

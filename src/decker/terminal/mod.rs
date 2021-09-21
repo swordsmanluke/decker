@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::rex::TaskId;
-use crate::rex::terminal::internal::{StreamState, ViewPort};
+use crate::decker::TaskId;
+use crate::decker::terminal::internal::{StreamState, ViewPort};
 
 mod pane_manager;
 mod pane;

@@ -1,4 +1,4 @@
-use crate::rex::child::ChildProcess;
+use crate::decker::child::ChildProcess;
 use portable_pty::CommandBuilder;
 
 impl ChildProcess {

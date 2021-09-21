@@ -9,7 +9,7 @@ pub(crate) mod terminal;
 pub(crate) mod config;
 
 use serde::{Deserialize, Serialize};
-use crate::rex::master_control::PaneSize;
+use crate::decker::master_control::PaneSize;
 use lazy_static::lazy_static;
 use portable_pty::{PtyPair, Child};
 use std::sync::{Arc, RwLock};

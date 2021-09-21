@@ -2,7 +2,7 @@ use std::cmp::{max, min};
 use std::io::Write;
 use log::{debug, info};
 use std::fmt::{Debug, Formatter};
-use crate::rex::terminal::PrintStyle;
+use crate::decker::terminal::PrintStyle;
 
 #[derive(Clone)]
 pub struct GlyphString {

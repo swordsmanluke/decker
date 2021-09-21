@@ -1,5 +1,5 @@
-use crate::rex::TaskId;
-use crate::rex::terminal::{PaneManager, Pane};
+use crate::decker::TaskId;
+use crate::decker::terminal::{PaneManager, Pane};
 use std::io::Write;
 use log::{info, error};
 

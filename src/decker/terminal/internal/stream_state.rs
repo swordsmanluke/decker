@@ -1,6 +1,6 @@
-use crate::rex::terminal::internal::{StreamState, TerminalOutput, VT100};
-use crate::rex::terminal::internal::VT100State::{PlainText, FoundEsc};
-use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
+use crate::decker::terminal::internal::{StreamState, TerminalOutput, VT100};
+use crate::decker::terminal::internal::VT100State::{PlainText, FoundEsc};
+use crate::decker::terminal::internal::TerminalOutput::{Plaintext, CSI};
 use regex::Regex;
 use lazy_static::lazy_static;
 use std::str::FromStr;

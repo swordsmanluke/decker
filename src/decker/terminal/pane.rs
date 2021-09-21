@@ -1,12 +1,12 @@
 use regex::Regex;
-use crate::rex::terminal::internal::{StreamState, VT100, ViewPort};
-use crate::rex::terminal::internal::TerminalOutput::{Plaintext, CSI};
+use crate::decker::terminal::internal::{StreamState, VT100, ViewPort};
+use crate::decker::terminal::internal::TerminalOutput::{Plaintext, CSI};
 use std::io::Write;
 use log::{info};
 use anyhow::bail;
 use std::fmt::{Display, Formatter};
 use lazy_static::lazy_static;
-use crate::rex::terminal::{ScrollMode, Pane, Color, PrintStyle, DeletionType};
+use crate::decker::terminal::{ScrollMode, Pane, Color, PrintStyle, DeletionType};
 
 impl Display for Color {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -279,9 +279,6 @@ impl Pane {
                             '\u{8}' => {
                                 /* Backspace */
                                 self.view_port.cursor_left(1);
-                                // let idx = self.view_port.cursor().col() - 1;
-                                // let line = self.view_port.cur_line();
-                                // // line.clear_at(idx as usize);
                             }
                             '\n' => {
                                 info!("main: New line for \\n");
@@ -302,7 +299,7 @@ impl Pane {
                                 match c as u8 {
                                     0x20..=0xFF => {
                                         // Visible characters
-                                        let col = (self.view_port.cursor().col() - 1) as usize;
+                                        let col = self.view_port.cursor().col() as usize;
                                         let style = self.view_port.style();
                                         let line = self.view_port.cur_line();
                                         line.set(col, c, &style);
@@ -411,12 +408,12 @@ impl Pane {
     }
 
     pub fn take_cursor(&self, target: &mut dyn Write) -> anyhow::Result<()> {
-        // put cursor where it belongs
+        // put cursor where it belongs (Note that screen coordinates are 1-based instead of zero based.
         let row = self.view_port.cursor().row();
         let col = self.view_port.cursor().col();
 
         let global_y = row + self.y;
-        let global_x = col + self.x - 1;
+        let global_x = col + self.x;
 
         info!("{}: Putting cursor at {}x{}y (global: {},{})", self.id, col, row, global_x, global_y);
         write!(target, "\x1b[{};{}H", global_y, global_x)?;

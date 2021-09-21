@@ -1,6 +1,6 @@
-use crate::rex::terminal::internal::ViewPort;
-use crate::rex::terminal::internal::glyph_string::GlyphString;
-use crate::rex::terminal::{Cursor, ScrollMode, PrintStyle, DeletionType};
+use crate::decker::terminal::internal::ViewPort;
+use crate::decker::terminal::internal::glyph_string::GlyphString;
+use crate::decker::terminal::{Cursor, ScrollMode, PrintStyle, DeletionType};
 use log::{info, warn};
 
 impl ViewPort {
@@ -39,8 +39,8 @@ impl ViewPort {
     }
 
     pub(crate) fn clear(&mut self, deletion_type: DeletionType) {
-        let row = (self.cursor().row() - 1) as usize;
-        let col = (self.cursor().col() - 1) as usize;
+        let row = self.cursor().row() as usize;
+        let col = self.cursor().col() as usize;
 
         info!("{}: CSI deletion: {:?}",self.pane_id, deletion_type);
 
@@ -92,7 +92,7 @@ impl ViewPort {
     }
 
     pub fn newline(&mut self) {
-        if self.cursor().row() == (self.height - 1) as u16 {
+        if self.cursor().row() == self.height as u16 {
             match self.scroll_mode {
                 ScrollMode::Scroll => {
                     self.remove(0);
@@ -105,7 +105,7 @@ impl ViewPort {
             }
         }
 
-        self.cursor.set_x(1);
+        self.cursor.set_x(0);
         self.cursor.incr_y(1);
     }
 
@@ -160,7 +160,7 @@ impl ViewPort {
     }
 
     pub fn cursor_home(&mut self) {
-        self.cursor.set_x(1)
+        self.cursor.set_x(0)
     }
 
     pub fn cursor_loc(&self) -> (u16, u16) {
