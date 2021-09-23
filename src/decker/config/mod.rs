@@ -5,7 +5,7 @@ use serde::Deserialize;
 use toml::de::Error;
 
 #[derive(Deserialize, Clone)]
-pub struct HexConfig {
+pub struct DeckerConfig {
     pub tasks: Vec<Task>,
     pub panes: Vec<PaneDefinition>
 }
@@ -25,11 +25,11 @@ impl PaneDefinition {
     }
 }
 
-pub fn load_task_config() -> Option<HexConfig> {
+pub fn load_task_config() -> Option<DeckerConfig> {
     let mut tasks_file = File::open("config/tasks.toml").unwrap();
     let mut toml_tasks = String::new();
     tasks_file.read_to_string(&mut toml_tasks).unwrap();
-    let config: Result<HexConfig, Error> = toml::from_str(&toml_tasks);
+    let config: Result<DeckerConfig, Error> = toml::from_str(&toml_tasks);
 
     match config {
         Ok(conf) => {

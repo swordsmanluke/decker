@@ -15,7 +15,7 @@ mod decker;
 
 fn run() -> anyhow::Result<()> {
     init_logging()?;
-    let hex_cfg = load_task_config().unwrap();
+    let deck_cfg = load_task_config().unwrap();
 
     // base-level stdin/out channels
     let mut stdin = termion::async_stdin();
@@ -37,7 +37,7 @@ fn run() -> anyhow::Result<()> {
     let mut pane_manager = PaneManager::new();
 
     // Register all the configured Panes
-    for p in hex_cfg.panes {
+    for p in deck_cfg.panes {
         let mut new_pane = Pane::new(&p.task_id, p.x, p.y, p.height, p.width);
         if p.is_main() { new_pane.set_scroll_mode(ScrollMode::Scroll); }
         pane_manager.register(p.task_id, new_pane);
@@ -55,7 +55,7 @@ fn run() -> anyhow::Result<()> {
     let mut mcp = MasterControl::new(cmd_tx, resp_rx);
 
     //  Now we can register all the configured Tasks
-    for mut task in hex_cfg.tasks {
+    for mut task in deck_cfg.tasks {
         task.cache_period(); // TODO: This is an ugly solution. We don't call 'Task::new', so we don't have the usual hook to do this sorta call
         match pane_manager.find_by_id(&task.id) {
             None => {
@@ -143,7 +143,7 @@ fn start_orchestrator(mut orchestrator: ProcessOrchestrator) {
 fn init_logging() -> anyhow::Result<()> {
     CombinedLogger::init(
         vec![
-            WriteLogger::new(LevelFilter::Info, Config::default(), File::create("log/hex.log")?),
+            WriteLogger::new(LevelFilter::Info, Config::default(), File::create("log/decker.log")?),
         ]
     )?;
 
