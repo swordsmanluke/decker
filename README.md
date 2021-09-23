@@ -4,8 +4,7 @@ A terminal multiplexer intended for use in a heads up display.
 Decker provides a configurable terminal session with an interactive pane and will also run as many scheduled read-only widgets as your heart desires. 
 
 ## Tl;Dr
-This project is still under heavy development and mostly doesn't work yet.
-Running passive 'widgets' works great. Running interactive shell sessions is unusably glitchy.
+This project is still under heavy development and mostly works, but with some rough edges.
 I'm working on it. Feel free to help out. You know, if you wanna. :D
 
 ## Why Yet Another Terminal Multiplexer?
