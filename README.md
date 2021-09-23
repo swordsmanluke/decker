@@ -21,7 +21,7 @@ I want a stream of helpful, passive information that I can access at a glance, l
 
 At the same time, I want a pane in which I can run interactive terminal applications like vim, or a custom To Do / Calendar day planner app. Or a barcode scanner to check online reviews and prices... and so on. 
 
-![decker_screenshot](https://user-images.githubusercontent.com/6879741/134535402-8c5bff26-ef56-45e5-ab19-f02f9454dcbc.png)
+![decker_screenshot](https://user-images.githubusercontent.com/6879741/134535863-19c47ffc-8603-486a-881d-ea364df1c8b0.png)
 
 ## Can't you just run e.g. Tmux for that anyway?
 Sure. I _could_. But like most multiplexers, Tmux has a status bar and other UI hints to help separate logical panes from one another. I don't want that. I only have about 72x19 characters on my HUD, so every line counts! Besides, I only have one pane that needs interaction - everything else would just be the equivalent of running `watch <some script>`.
