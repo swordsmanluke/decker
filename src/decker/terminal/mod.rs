@@ -54,11 +54,14 @@ pub enum DeletionType {
     Unknown(String)
 }
 
+pub type ScreenCoord = i32;
+pub type VirtualCoord = u16;
+
 pub struct Cursor {
-    x: i32,
-    y: i32,
-    x_max: i32,
-    y_max: i32
+    x: VirtualCoord,
+    y: VirtualCoord,
+    x_max: VirtualCoord,
+    y_max: VirtualCoord
 }
 
 pub struct Pane {

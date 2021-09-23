@@ -1,6 +1,6 @@
 use crate::decker::terminal::internal::TerminalOutput::{CSI, Plaintext};
 use std::str::FromStr;
-use crate::decker::terminal::internal::VT100::{SGR, PassThrough, MoveCursor, EraseScreen, EraseLine, ClearLine, Unknown, ScrollDown, ScrollUp, MoveCursorApp, HideCursor, ShowCursor, GetCursorPos, EnterAltKeypadMode, ExitAltKeypadMode};
+use crate::decker::terminal::internal::VT100::{SGR, PassThrough, MoveCursor, EraseScreen, ClearLine, Unknown, ScrollDown, ScrollUp, MoveCursorApp, HideCursor, ShowCursor, GetCursorPos, EnterApplicationKeyMode, ExitAltKeypadMode, EraseLineAfterCursor, EraseLineBeforeCursor, EnterAltKeypadMode};
 use anyhow::Error;
 use std::fmt::Debug;
 use crate::decker::terminal::internal::glyph_string::GlyphString;
@@ -19,13 +19,11 @@ enum VT100State {
 
 pub(crate) struct ViewPort {
     pane_id: String,
-    garbage_line: GlyphString,
-    // dump non-visible text here
     visible_lines: Vec<GlyphString>,
     cur_style: PrintStyle,
     scroll_mode: ScrollMode,
-    width: usize,
-    height: usize,
+    width: u16,
+    height: u16,
     cursor: Cursor,
 }
 
@@ -51,12 +49,14 @@ pub enum VT100 {
     MoveCursor(String),
     MoveCursorApp(String),
     ClearLine(String),
-    EraseLine(String),
+    EraseLineAfterCursor(String),
+    EraseLineBeforeCursor(String),
     EraseScreen(String),
     PassThrough(String),
     HideCursor(String),
     ShowCursor(String),
     GetCursorPos(String),
+    EnterApplicationKeyMode(String),
     EnterAltKeypadMode(String),
     ExitAltKeypadMode(String),
     Unknown(String),
@@ -71,13 +71,15 @@ impl VT100 {
             MoveCursor(s) => { s.clone() }
             MoveCursorApp(s) => { s.clone() }
             ClearLine(s) => { s.clone() }
-            EraseLine(s) => { s.clone() }
+            EraseLineBeforeCursor(s) => { s.clone() }
+            EraseLineAfterCursor(s) => { s.clone() }
             EraseScreen(s) => { s.clone() }
             HideCursor(s) => { s.clone() }
             ShowCursor(s) => { s.clone() }
             PassThrough(s) => { s.clone() }
             GetCursorPos(s) => { s.clone() }
             Unknown(s) => { s.clone() }
+            EnterApplicationKeyMode(s) => { s.clone() }
             EnterAltKeypadMode(s) => { s.clone() }
             ExitAltKeypadMode(s) => { s.clone() }
         }
@@ -115,10 +117,15 @@ impl FromStr for VT100 {
                 }
             }
             'J' => EraseScreen(s.to_string()),
-            'K' => EraseLine(s.to_string()),
+            'K' => match s {
+                "\x1B[1K" => EraseLineBeforeCursor(s.to_string()),
+                "\x1B[2K" => ClearLine(s.to_string()),
+                _ => EraseLineAfterCursor(s.to_string())
+            }
             'L' => ClearLine(s.to_string()),
             'h' | 'l' | 'n' | 'r' => /* Various control / query options */
                 match s {
+                    "\x1b[?1h" => EnterApplicationKeyMode(s.to_string()),
                     "\x1b[?25l" => HideCursor(s.to_string()),
                     "\x1b[?25h" => ShowCursor(s.to_string()),
                     "\x1b[6n" => GetCursorPos(s.to_string()),
@@ -126,7 +133,7 @@ impl FromStr for VT100 {
                 }
             _ => {
                 if s[0..2] == *"\x1Bk" {
-                    EraseLine(s.to_string())
+                    ClearLine(s.to_string())
                 } else {
                     Unknown(s.to_string())
                 }

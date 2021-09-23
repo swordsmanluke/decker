@@ -2,17 +2,17 @@ use std::cmp::{max, min};
 use std::io::Write;
 use log::{debug, info};
 use std::fmt::{Debug, Formatter};
-use crate::decker::terminal::PrintStyle;
+use crate::decker::terminal::{PrintStyle, VirtualCoord};
 
 #[derive(Clone)]
 pub struct GlyphString {
-    glyphs: Vec<Glyph>,
+    pub glyphs: Vec<Glyph>,
     string_rep: String,
     dirty: bool
 }
 
 #[derive(Copy, Clone, Debug)]
-struct Glyph {
+pub struct Glyph {
     pub c: char,
     pub style: PrintStyle,
     pub dirty: bool,
@@ -60,39 +60,39 @@ impl GlyphString {
         self.dirty = true
     }
 
-    pub fn set(&mut self, index: usize, c: char, style: &PrintStyle) {
+    pub fn set(&mut self, index: VirtualCoord, c: char, style: &PrintStyle) {
         let extra_chars_reqd = max(0, index as i32 - (self.glyphs.len() as i32 - 1));
         let default_style = self.glyphs.last().unwrap_or(&Glyph::default()).style;
         for _ in 0..extra_chars_reqd {
             self.glyphs.push(Glyph::new(' ', default_style.clone()));
         }
 
-        self.glyphs[index] = Glyph::new(c, style.clone());
-        self.build_string_rep()
+        self.glyphs[index as usize] = Glyph::new(c, style.clone());
+        self.make_dirty()
     }
 
     pub fn push(&mut self, s: &str, style: &PrintStyle) {
         let mut i = self.glyphs.len();
         for c in s.chars() {
-            self.set(i, c, style);
+            self.set(i as VirtualCoord, c, style);
             i += 1;
         }
     }
 
     pub fn clear_to(&mut self, idx: usize) {
         for i in 0..idx {
-            self.set(i, ' ', &PrintStyle::default());
+            self.set(i as VirtualCoord, ' ', &PrintStyle::default());
         }
     }
 
     pub fn clear_at(&mut self, idx: usize) {
-        self.set(idx, ' ', &PrintStyle::default());
+        self.set(idx as VirtualCoord, ' ', &PrintStyle::default());
     }
 
     pub fn delete_to(&mut self, idx: usize) {
         let start = min(self.len(), idx);
         self.glyphs = self.glyphs[start..self.len()].to_owned();
-        self.build_string_rep();
+        self.make_dirty()
     }
 
     pub fn clear_after(&mut self, idx: usize) {
@@ -104,8 +104,9 @@ impl GlyphString {
     }
 
     pub fn clear(&mut self) {
+        info!("Clearing string: '{}'", self.plaintext());
         self.glyphs.clear();
-        self.build_string_rep();
+        self.make_dirty()
     }
 
     pub fn write(&mut self, x_offset: u16, y_offset: u16, width: u16, style: &PrintStyle, target: &mut dyn Write) -> anyhow::Result<()> {
@@ -135,30 +136,9 @@ impl GlyphString {
         Ok(())
     }
 
-    fn build_string_rep(&mut self) {
-        let mut output = String::new();
-        let mut cur_style = self.glyphs.first().unwrap_or(&Glyph::default()).style.clone(); // No mutating args!
-
-        self.glyphs.iter_mut().for_each(|g| {
-            g.dirty = false; // We've printed you now!
-
-            // Make sure to keep the correct style for each glyph
-            let diff = cur_style.diff_str(&g.style);
-
-            if diff.len() > 0 {
-                debug!("Updating style. FG/BG: {}/{} Str: {}", g.style.foreground, g.style.background, g.c);
-                cur_style = g.style;
-                output.push_str(&diff);
-            }
-
-            output.push(g.c);
-        });
-
-        self.string_rep = output;
-        self.make_dirty();
-    }
-
     fn str_with_width(&mut self, width: usize) -> String {
+        info!("Printing string with width {}", width);
+
         let mut output = String::new();
         let mut cur_style = self.glyphs.first().unwrap_or(&Glyph::default()).style.clone(); // No mutating args!
 
@@ -176,6 +156,8 @@ impl GlyphString {
 
             output.push(g.c);
         });
+
+        info!("output: {}, glyph len: {}", output, self.glyphs.len());
 
         output
     }

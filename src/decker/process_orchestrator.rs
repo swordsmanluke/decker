@@ -20,8 +20,8 @@ impl ProcessOrchestrator {
      */
     pub fn new(output_tx: Sender<ProcOutput>, cmd_tx: Sender<String>, cmd_rx: Receiver<String>, resp_tx: Sender<String>, input_rx: Receiver<String>, pane_size: (u16, u16)) -> ProcessOrchestrator {
         let pty = portable_pty::native_pty_system().openpty(PtySize {
-            rows: pane_size.0,
-            cols: pane_size.1,
+            rows: pane_size.1,
+            cols: pane_size.0,
             pixel_width: 0,
             pixel_height: 0,
         }).unwrap();

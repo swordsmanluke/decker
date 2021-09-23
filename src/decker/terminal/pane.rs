@@ -6,7 +6,7 @@ use log::{info};
 use anyhow::bail;
 use std::fmt::{Display, Formatter};
 use lazy_static::lazy_static;
-use crate::decker::terminal::{ScrollMode, Pane, Color, PrintStyle, DeletionType};
+use crate::decker::terminal::{ScrollMode, Pane, Color, PrintStyle, DeletionType, ScreenCoord, VirtualCoord};
 
 impl Display for Color {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -299,10 +299,10 @@ impl Pane {
                                 match c as u8 {
                                     0x20..=0xFF => {
                                         // Visible characters
-                                        let col = self.view_port.cursor().col() as usize;
+                                        let index = self.view_port.cursor().x();
                                         let style = self.view_port.style();
                                         let line = self.view_port.cur_line();
-                                        line.set(col, c, &style);
+                                        line.set(index, c, &style);
                                         self.view_port.cursor_right(1);
                                     }
                                     _ => {
@@ -327,7 +327,8 @@ impl Pane {
                             self.move_cursor(&code)?
                         }
                         VT100::ClearLine(code) |
-                        VT100::EraseLine(code) |
+                        VT100::EraseLineBeforeCursor(code) |
+                        VT100::EraseLineAfterCursor(code) |
                         VT100::EraseScreen(code) => {
                             /* text deletion */
                             self.delete_text(&code)?
@@ -335,7 +336,7 @@ impl Pane {
                         VT100::HideCursor(code) => { print!("{}", code) }
                         VT100::ShowCursor(code) => { print!("{}", code) }
                         VT100::GetCursorPos(code) => { print!("{}", code) }
-                        VT100::EnterAltKeypadMode(code) => { print!("{}", code) }
+                        VT100::EnterApplicationKeyMode(code) => { print!("{}", code) }
                         VT100::ExitAltKeypadMode(code) => { print!("{}", code) }
                         VT100::PassThrough(code) => {
                             /* Loads of control options */
@@ -370,12 +371,15 @@ impl Pane {
                             info!("{}: Unknown CSI {:?}", self.id, code);
                             print!("{}", code);
                         }
+
+                        // FIXME: Not yet handled
+                        VT100::EnterAltKeypadMode(_) => {}
                     }
                 }
             }
         }
 
-        info!("{}: Processing line ({}): \"{:?}\"", self.id, self.view_port.cursor().row(), self.view_port.cur_line());
+        info!("{}: Processing line ({}): \"{:?}\"", self.id, self.view_port.cursor().y(), self.view_port.cur_line());
 
         Ok(())
     }
@@ -393,7 +397,8 @@ impl Pane {
 
         self.view_port.take_visible_lines().iter_mut().for_each(|line| {
             if line.dirty() {
-                info!("{}: Printing plaintext@({},{}): {:?}", pane_id, x_off, y_off + line_idx, line.plaintext());
+                info!("{}: Printing plaintext@({}): {:?}", pane_id, line_idx, line.plaintext());
+                info!("{}: glyphs: {}", pane_id, line.glyphs.len());
                 line.write(x_off, y_off + line_idx, width, &ps, &mut chunks).unwrap();
             }
             line_idx += 1;
@@ -412,8 +417,8 @@ impl Pane {
         let row = self.view_port.cursor().row();
         let col = self.view_port.cursor().col();
 
-        let global_y = row + self.y;
-        let global_x = col + self.x;
+        let global_y = row + self.y as i32 - 1;
+        let global_x = col + self.x as i32 - 1;
 
         info!("{}: Putting cursor at {}x{}y (global: {},{})", self.id, col, row, global_x, global_y);
         write!(target, "\x1b[{};{}H", global_y, global_x)?;
@@ -461,14 +466,15 @@ impl Pane {
                 let captures = HOME_REGEX.captures(vt100_code).unwrap();
 
                 let row = match captures.get(1) {
-                    None => { 0 }
-                    Some(m) => { m.as_str().to_owned().parse::<u16>().unwrap_or(0) }
+                    None => { 1 }
+                    Some(m) => { m.as_str().to_owned().parse::<ScreenCoord>().unwrap_or(1) }
                 };
                 let col = match captures.get(2) {
-                    None => { 0 }
-                    Some(m) => { m.as_str().to_owned().parse::<u16>().unwrap_or(0) }
+                    None => { 1 }
+                    Some(m) => { m.as_str().to_owned().parse::<ScreenCoord>().unwrap_or(1) }
                 };
 
+                // Subtract one to move into zero-based indices
                 self.view_port.cursor_goto(row, col);
             }
 
@@ -533,7 +539,7 @@ mod tests {
     #[test]
     fn it_displays_blank_space_on_creation() {
         let mut pane = Pane::new("p1", 1, 1, 10, 20);
-        assert_eq!("\n\n\n\n\n\n\n\n\n", pane.plaintext());
+        assert_eq!("", pane.plaintext());
     }
 
     #[test]
@@ -543,8 +549,17 @@ mod tests {
         assert_eq!("a line of text\n\n\n\n\n\n\n\n\n", pane.plaintext());
     }
 
+    #[test]
+    fn it_displays_line_at_bottom_of_screen() {
+        let mut pane = Pane::new("p1", 1, 1, 5, 10);
+        pane.set_scroll_mode(ScrollMode::Fixed);
+        pane.push("\x1B[5;1H").unwrap(); // Go to the last line
+        pane.push("some text").unwrap();
+        assert_eq!("\n\n\n\nsome text", pane.plaintext());
+    }
+
     /***
-    PrintState Tests
+    PrintStyle Tests
      */
     #[test]
     fn it_converts_simple_vt100_sgr_to_print_state() {
