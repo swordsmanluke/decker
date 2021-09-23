@@ -26,6 +26,10 @@ At the same time, I want a pane in which I can run interactive terminal applicat
 ## Can't you just run e.g. Tmux for that anyway?
 Sure. I _could_. But like most multiplexers, Tmux has a status bar and other UI hints to help separate logical panes from one another. I don't want that. I only have about 72x19 characters on my HUD, so every line counts! Besides, I only have one pane that needs interaction - everything else would just be the equivalent of running `watch <some script>`.
 
+## Cool. ...how do I exit?
+Right now, Decker is hardcoded to start zsh upon launch. To quit Decker, exit zsh (`exit` or ^D) and then ^C will kill Decker itself.
+...unless you hit a bug that kills the input listener. In that case, you gotta run `killall decker` from another shell. 
+
 ## Why Rust?
 Originally, I wrote v1 of what would become Decker in Kotlin! But it wasn't as performant as I'd like on my RasPi Zero W. So I figured I'd try out a compiled language and so long as I was at it... Let's try Rust!
 
