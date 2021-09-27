@@ -69,7 +69,7 @@ fn run() -> anyhow::Result<()> {
     }
 
     // TODO: Pull the default main task from the cfg instead of hardcoding it.
-    let task_id: TaskId = TaskId::from("zsh");
+    let task_id: TaskId = TaskId::from("todo");
     mcp.activate_proc(&task_id, pane_manager.find_by_id("main").unwrap())?;
     mcp.execute(&task_id)?;
 
@@ -91,6 +91,8 @@ fn run_input_forwarding_loop(stdin: &mut AsyncReader, input_tx: Sender<String>, 
         // byte at a time. /shrug
         if let Ok(_) = stdin.read_exact(&mut buffer[..1]) {
             info!("main: Processing input: '{}'", buffer[0] as char);
+            // TODO: if !mcp.running(), input goes to decker CLI, for launching known tasks from.
+
             if buffer[0] == 3 { // Ctrl-C
                 if !mcp.running().unwrap() {
                     info!("main: ^C means shutdown!");
@@ -109,6 +111,7 @@ fn run_input_forwarding_loop(stdin: &mut AsyncReader, input_tx: Sender<String>, 
             thread::sleep(Duration::from_millis(30));
         }
     }
+    // TODO: Send shutdown signal to MCP here
     info!("main: Exited top-level input forwarding");
 }
 
