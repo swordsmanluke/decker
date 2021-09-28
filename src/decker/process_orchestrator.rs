@@ -1,8 +1,8 @@
-use crate::decker::{ProcessOrchestrator, ProcOutput, TaskId};
+use crate::decker::{ProcessOrchestrator, ProcOutput, TaskId, Task};
 use crate::decker::child::ChildProcess;
 use std::collections::HashMap;
 use std::thread;
-use log::{info, error};
+use log::{debug, info, error};
 use crate::decker::master_control::{RegisterTask, ResizeTask};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use crossbeam_channel::{Sender, Receiver};
@@ -10,7 +10,7 @@ use portable_pty::PtySize;
 use std::io::{Read, Write};
 use std::process::Command;
 use anyhow::anyhow;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, LockResult};
 use termion::raw::IntoRawMode;
 
 impl ProcessOrchestrator {
@@ -31,7 +31,7 @@ impl ProcessOrchestrator {
         ProcessOrchestrator {
             tasks: HashMap::new(),
             sizes: HashMap::new(),
-            next_run: Arc::new(RwLock::new(HashMap::new())),
+            periodic_tasks: Arc::new(RwLock::new(HashMap::new())),
             command_tx: cmd_tx,
             command_rx: cmd_rx,
             resp_tx: resp_tx,
@@ -50,9 +50,11 @@ impl ProcessOrchestrator {
      */
     pub fn run(&mut self) -> anyhow::Result<()> {
         info!("main: Starting ProcessOrchestrator");
+        info!("main: Total tasks: {}", self.tasks.len());
+
         Self::start_forward_output_loop(self.main_pty.master.try_clone_reader()?, self.output_tx.clone())?;
         Self::start_forward_input_loop(self.input_rx.clone(), self.main_pty.master.try_clone_writer()?, "main".to_string());
-        Self::start_period_task_loop(self.next_run.clone(), self.command_tx.clone());
+        Self::start_period_task_loop(self.periodic_tasks.clone(), self.command_tx.clone());
         self.process_commands()?;
         Ok(())
     }
@@ -113,25 +115,6 @@ impl ProcessOrchestrator {
                             thread::spawn(move || {
                                 Self::capture_output(output_tx, new_kid, pane_id).unwrap();
                             });
-                        }
-
-                        match task.period_secs {
-                            None => {}
-                            Some(period) => {
-                                let run_at = SystemTime::now().
-                                    checked_add(Duration::new(period, 0)).
-                                    unwrap().
-                                    duration_since(UNIX_EPOCH).unwrap().
-                                    as_secs();
-
-                                match self.next_run.write() {
-                                    Ok(mut next) => {
-                                        next.insert(task_id.to_string(), run_at);
-                                        info!("PTL: Scheduling {} to run at {}", task_id, run_at);
-                                    }
-                                    Err(e) => { info!("Failed to store next run: {}", e); }
-                                }
-                            }
                         }
                     }
                 }
@@ -259,6 +242,16 @@ impl ProcessOrchestrator {
     fn register_task(&mut self, register_str: &str) -> anyhow::Result<()> {
         let register: RegisterTask = serde_json::from_str(register_str)?;
         self.sizes.insert(register.task.id.clone(), register.size);
+
+        if register.task.period_secs.is_some() {
+            match self.periodic_tasks.write() {
+                Ok(mut period_tasks) => {
+                    period_tasks.insert(register.task.id.clone(), register.task.period_secs.unwrap());
+                }
+                Err(_) => {}
+            }
+        }
+
         self.tasks.insert(register.task.id.clone(), register.task);
 
         Ok(())
@@ -271,42 +264,35 @@ impl ProcessOrchestrator {
         Ok(())
     }
 
-    fn start_period_task_loop(next_run_times: Arc<RwLock<HashMap<TaskId, u64>>>, commander: Sender<String>) {
+    fn start_period_task_loop(task_periods: Arc<RwLock<HashMap<TaskId, u64>>>, commander: Sender<String>) {
+
+        let mut last_run_times: HashMap<String, SystemTime> = HashMap::new();
+
         thread::spawn(move || {
             loop {
-                let now_timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-                info!("PTL: Awake - checking for tasks");
+                let now = SystemTime::now();
+                debug!("PTL: Awake - checking for tasks");
 
-                let ready_task_ids = match next_run_times.read() {
-                    Ok(next_run) => {
-                        next_run.iter().
-                            filter(|(_, timestamp)| now_timestamp >= **timestamp).
-                            map(|(t_id, _)| t_id).
-                            cloned().
-                            collect::<Vec<String>>()
-                    }
-                    Err(e) => {
-                        error!("PTL: Failed to read next_run: {}", e);
-                        Vec::new()
-                    }
-                };
+                let ready_task_ids = task_periods.read().unwrap().iter().
+                    filter(|(t_id, period)| {
+                        let most_recent_run = *last_run_times.get(*t_id).unwrap_or(&UNIX_EPOCH);
+                        let time_since = now.duration_since(most_recent_run).unwrap();
+                        time_since.as_secs() > **period
+                    }).
+                    map(|(t_id, _)| t_id.clone()).collect::<Vec<_>>();
 
-                info!("PTL: Found {} tasks: {:?}", ready_task_ids.len(), ready_task_ids);
+                debug!("PTL: Found {} tasks: {:?}", ready_task_ids.len(), ready_task_ids);
 
                 if ready_task_ids.is_empty() {
-                    let nap_duration = Duration::new(1, 0);
-                    info!("PTL: Sleeping for {:?}", nap_duration);
+                    let nap_duration = Duration::from_millis(250);
                     thread::sleep(nap_duration);
                     continue;
                 }
 
-                for id in ready_task_ids {
-                    info!("PTL: Sending local_execute command for: {}", id);
-                    commander.send(format!("local_execute: {}", id.to_owned())).unwrap();
-                    match next_run_times.write() {
-                        Ok(mut next_run) => { next_run.remove(&id); }
-                        Err(e) => { error!("PTL: Failed to remove {} from next_run: {}", id, e); }
-                    }
+                for task_id in ready_task_ids {
+                    info!("PTL: Sending local_execute command for: {}", task_id);
+                    commander.send(format!("local_execute: {}", task_id.to_owned())).unwrap();
+                    last_run_times.insert(task_id, SystemTime::now());
                 }
             }
         });

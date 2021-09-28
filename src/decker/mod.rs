@@ -68,7 +68,7 @@ pub struct ProcessOrchestrator {
     // Track all of our registered tasks
     tasks: HashMap<String, Task>,
     sizes: HashMap<String, PaneSize>,
-    next_run: Arc<RwLock<HashMap<TaskId, u64>>>,
+    periodic_tasks: Arc<RwLock<HashMap<TaskId, u64>>>,
 
     // Should we keep running?
     shutdown: bool,
