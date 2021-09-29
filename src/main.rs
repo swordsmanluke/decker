@@ -1,5 +1,5 @@
-use std::io::{Read, Write, stdout, Stdout};
-use log::{ info, error };
+use std::io::{Read, Write, stdout, Stdout, stdin, Stdin};
+use log::{info, error};
 use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
 use std::fs::File;
 use termion::raw::{IntoRawMode, RawTerminal};
@@ -18,7 +18,7 @@ fn run() -> anyhow::Result<()> {
     let deck_cfg = load_task_config().unwrap();
 
     // base-level stdin/out channels
-    let mut stdin = termion::async_stdin();
+    let mut stdin = stdin();
     let stdout = stdout().into_raw_mode()?;
 
     // The channels we need for comms
@@ -81,34 +81,34 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_input_forwarding_loop(stdin: &mut AsyncReader, input_tx: Sender<String>, mcp: &mut MasterControl) {
-    let mut buffer: [u8; 1] = [0; 1];
+fn run_input_forwarding_loop(stdin: &mut Stdin, input_tx: Sender<String>, mcp: &mut MasterControl) {
+    let mut buffer: Vec<u8> = vec![0,0,0,0,0];
 
     loop {
-        // Reading stdin 1 byte at a time. For some reason, calling 'read' leads to
-        // receiving errors. Calling read_to_string works, but then we're creating
-        // Strings _all the damn time_ for no reason. So instead.... just read one
-        // byte at a time. /shrug
-        if let Ok(_) = stdin.read_exact(&mut buffer[..1]) {
-            info!("main: Processing input: '{}'", buffer[0] as char);
-            // TODO: if !mcp.running(), input goes to decker CLI, for launching known tasks from.
+        match stdin.read(&mut buffer) {
+            Ok(0) => {}
+            Ok(count) => {
+                info!("main: Processing input: '{:?}'", buffer);
+                // TODO: if !mcp.running(), input goes to decker CLI, for launching known tasks from.
 
-            if buffer[0] == 3 { // Ctrl-C
-                if !mcp.running().unwrap() {
-                    info!("main: ^C means shutdown!");
-                    break;
-                };
-            }
+                if let Some(3) = buffer.first() { // Ctrl-C
+                    if !mcp.running().unwrap() {
+                        info!("main: ^C means shutdown!");
+                        break;
+                    };
+                }
 
-            match input_tx.send(String::from(buffer[0] as char)) {
-                Ok(_) => {}
-                Err(err) => {
-                    error!("main: {}", err);
-                    break;
+                match input_tx.send(String::from_utf8(buffer[..count].to_owned()).unwrap()) {
+                    Ok(_) => {}
+                    Err(err) => {
+                        error!("main: {}", err);
+                        break;
+                    }
                 }
             }
-        } else {
-            thread::sleep(Duration::from_millis(30));
+            Err(e) => {
+                thread::sleep(Duration::from_millis(30));
+            }
         }
     }
     // TODO: Send shutdown signal to MCP here
@@ -160,7 +160,7 @@ fn main() {
     // Input Thread: Forward stdin to the child's Input channel
     // Output Thread: Forward stdout from the child to the Output channel
     match run() {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(err) => { error!("Fatal error {:?}", err.to_string()); }
     }
 
