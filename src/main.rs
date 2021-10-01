@@ -46,7 +46,8 @@ fn run() -> anyhow::Result<()> {
     let main_pane = pane_manager.find_by_id("main").unwrap();
 
     // Process Orchestrator is in charge of managing all of the processes and forwarding IO
-    // It's got to live in a different thread, however, so we communicate with it via the MCP
+    // It's got to live in a different thread, however, so we communicate with it via the
+    // Master Control facade.
     let orchestrator = ProcessOrchestrator::new(output_tx, cmd_tx.clone(), cmd_rx, resp_tx, input_rx, (main_pane.width(), main_pane.height()));
     start_orchestrator(orchestrator);
 
@@ -75,7 +76,7 @@ fn run() -> anyhow::Result<()> {
 
     println!("\x1b[2J"); // clear screen before we begin
 
-    start_output_forwarding_thread(stdout, output_rx, pane_manager);
+    start_output_forwarding_thread(output_rx, pane_manager);
     run_input_forwarding_loop(&mut stdin, input_tx, &mut mcp); // doesn't return until shutdown
 
     Ok(())
@@ -115,8 +116,9 @@ fn run_input_forwarding_loop(stdin: &mut Stdin, input_tx: Sender<String>, mcp: &
     info!("main: Exited top-level input forwarding");
 }
 
-fn start_output_forwarding_thread(mut stdout: RawTerminal<Stdout>, output_rx: Receiver<ProcOutput>, mut pane_manager: PaneManager) {
+fn start_output_forwarding_thread(output_rx: Receiver<ProcOutput>, mut pane_manager: PaneManager) {
     thread::spawn(move || {
+        let mut stdout = stdout().into_raw_mode().unwrap();
         info!("main: Starting Output caputure thread");
         let last_printed = SystemTime::UNIX_EPOCH;
         // read stdout and display it
