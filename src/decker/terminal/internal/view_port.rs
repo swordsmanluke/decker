@@ -59,7 +59,9 @@ impl ViewPort {
             }
             DeletionType::ClearScreenAfterCursor => {
                 // Clear all the lines after us
-                self.visible_lines[y_idx +1..].iter_mut().for_each(|l| l.clear());
+                if y_idx + 1 < self.visible_lines.len() {
+                    self.visible_lines[y_idx + 1..].iter_mut().for_each(|l| l.clear());
+                }
                 // and our line
                 self.cur_line().clear_after(x_idx);
             }
